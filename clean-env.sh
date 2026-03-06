@@ -32,6 +32,14 @@ docker compose -f "$SCRIPT_DIR/docker/docker-compose.ark.yml" down --volumes --r
 log "Stopping nigiri..."
 $NIGIRI stop --delete || true
 
+# nigiri stop --delete may fail to remove volumes owned by container users (e.g. postgres)
+# Clean them up manually to prevent stale state on next start
+NIGIRI_DATA="${HOME}/.nigiri"
+if [ -d "$NIGIRI_DATA/volumes" ]; then
+  log "Removing nigiri volumes..."
+  sudo rm -rf "$NIGIRI_DATA/volumes" 2>/dev/null || rm -rf "$NIGIRI_DATA/volumes" 2>/dev/null || true
+fi
+
 # ── Optionally remove _build/ ────────────────────────────────────────────────
 if [[ "${CLEAN_BUILD:-false}" == "true" ]]; then
   log "Removing _build/ directory..."
