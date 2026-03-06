@@ -244,14 +244,7 @@ log "Pulling latest Nigiri images..."
 $NIGIRI update || log "Nigiri update failed, continuing with existing images..."
 
 log "Starting Nigiri with Ark and LN support..."
-$NIGIRI start --ark --ln || {
-  if [[ $? -eq 1 ]]; then
-    log "Nigiri may already be running, continuing..."
-  else
-    log "Failed to start nigiri with unexpected error"
-    exit 1
-  fi
-}
+$NIGIRI start --ark --ln || log "Nigiri may already be running, continuing..."
 
 # ── Bitcoin Core low-fee config ──────────────────────────────────────────────
 log "Configuring Bitcoin Core to accept low-fee transactions..."

@@ -21,7 +21,7 @@ if [[ -n "${NIGIRI_BRANCH:-}" ]]; then
 elif command -v nigiri &>/dev/null; then
   NIGIRI="nigiri"
 else
-  NIGIRI="$SCRIPT_DIR/_build/nigiri"
+  NIGIRI="$SCRIPT_DIR/_build/nigiri/build/nigiri"
 fi
 
 # ── Stop ark overlay stack ───────────────────────────────────────────────────
