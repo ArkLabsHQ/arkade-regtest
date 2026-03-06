@@ -1,0 +1,72 @@
+# arkade-regtest
+
+A self-contained regtest environment for Ark protocol development. It orchestrates Nigiri (Bitcoin + Liquid regtest), arkd, Fulmine, Boltz, and an LND node into a single reproducible stack using Docker Compose. Intended to be embedded as a git submodule in projects that need a local Ark test network.
+
+## Quick start
+
+```bash
+# Start the environment
+./start-env.sh
+
+# Stop all services (preserves data)
+./stop-env.sh
+
+# Stop and remove all containers, volumes, and build artifacts
+./clean-env.sh
+```
+
+## Configuration
+
+All defaults live in `.env.defaults`. To override any value, create a `.env` file (git-ignored) and pass it at startup:
+
+```bash
+./start-env.sh --env .env
+```
+
+Variables in `.env` take precedence over `.env.defaults`. You only need to specify the values you want to change.
+
+## Nigiri resolution
+
+The startup script resolves Nigiri in the following order:
+
+1. **Explicit branch** -- If `NIGIRI_BRANCH` is set in your `.env`, Nigiri is cloned and built from source using that branch.
+2. **System binary** -- If `NIGIRI_BRANCH` is unset and `nigiri` is already on `$PATH`, the system-installed binary is used as-is.
+3. **Default branch** -- If neither condition is met, Nigiri is cloned and built from source using `NIGIRI_BRANCH_DEFAULT` (currently `bump-arkd`).
+
+## Service URLs
+
+| Service          | URL / endpoint              | Default port |
+| ---------------- | --------------------------- | ------------ |
+| Boltz LND P2P    | `localhost:9736`            | 9736         |
+| Boltz LND RPC    | `localhost:10010`           | 10010        |
+| Fulmine HTTP     | `localhost:7002`            | 7002         |
+| Fulmine API      | `localhost:7003`            | 7003         |
+| Boltz gRPC       | `localhost:9000`            | 9000         |
+| Boltz REST API   | `localhost:9001`            | 9001         |
+| Boltz WebSocket  | `localhost:9004`            | 9004         |
+| Nginx            | `localhost:9069`            | 9069         |
+
+Nigiri's own services (electrs, esplora, chopsticks, arkd) use their standard ports. See the Nigiri documentation for details.
+
+## Helper scripts
+
+- **`create-invoice.sh`** -- Creates a Lightning invoice on the Boltz LND node. Useful for testing payment flows through Boltz swaps.
+- **`pay-invoice.sh`** -- Pays a Lightning invoice from the Boltz LND node. Useful for testing receive flows and Boltz reverse swaps.
+
+## Integration as a submodule
+
+Add this repo as a git submodule in your project:
+
+```bash
+git submodule add <repo-url> regtest
+git submodule update --init --recursive
+```
+
+Then start the environment from the submodule directory:
+
+```bash
+cd regtest
+./start-env.sh
+```
+
+Or reference it from your project's own scripts or CI pipeline by calling into the submodule path directly.
