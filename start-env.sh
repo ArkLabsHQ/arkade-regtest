@@ -88,14 +88,15 @@ build_nigiri_from_source() {
 
 resolve_nigiri() {
   if [ -n "${NIGIRI_BRANCH:-}" ]; then
-    # User explicitly wants a specific branch -> build from source
+    # Build from source using the specified branch
     build_nigiri_from_source "$NIGIRI_BRANCH"
   elif command -v nigiri &>/dev/null; then
+    # NIGIRI_BRANCH was explicitly cleared — use system binary
     NIGIRI="nigiri"
     log "Using system nigiri: $(nigiri --version)"
   else
-    # No system nigiri -> build from source with default branch
-    build_nigiri_from_source "${NIGIRI_BRANCH_DEFAULT}"
+    log "ERROR: NIGIRI_BRANCH is empty and no system nigiri found on PATH"
+    exit 1
   fi
 }
 

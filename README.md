@@ -27,11 +27,9 @@ Variables in `.env` take precedence over `.env.defaults`. You only need to speci
 
 ## Nigiri resolution
 
-The startup script resolves Nigiri in the following order:
+By default, Nigiri is built from source using the `bump-arkd` branch (`NIGIRI_BRANCH` in `.env.defaults`). This ensures all consumers use the exact same version with Ark support.
 
-1. **Explicit branch** -- If `NIGIRI_BRANCH` is set in your `.env`, Nigiri is cloned and built from source using that branch.
-2. **System binary** -- If `NIGIRI_BRANCH` is unset and `nigiri` is already on `$PATH`, the system-installed binary is used as-is.
-3. **Default branch** -- If neither condition is met, Nigiri is cloned and built from source using `NIGIRI_BRANCH_DEFAULT` (currently `bump-arkd`).
+To use a system-installed nigiri instead, set `NIGIRI_BRANCH=""` in your `.env` override. The script will then use whatever `nigiri` binary is on `$PATH`.
 
 ## Service URLs
 
