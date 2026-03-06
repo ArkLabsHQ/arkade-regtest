@@ -58,15 +58,23 @@ Nigiri's own services (electrs, esplora, chopsticks, arkd) use their standard po
 Add this repo as a git submodule in your project:
 
 ```bash
-git submodule add <repo-url> regtest
+git submodule add https://github.com/ArkLabsHQ/arkade-regtest.git arkade-regtest
 git submodule update --init --recursive
 ```
 
-Then start the environment from the submodule directory:
+Then call scripts from your project root:
 
 ```bash
-cd regtest
-./start-env.sh
+./arkade-regtest/start-env.sh
+./arkade-regtest/start-env.sh --env .env
+./arkade-regtest/stop-env.sh
+./arkade-regtest/clean-env.sh
 ```
 
-Or reference it from your project's own scripts or CI pipeline by calling into the submodule path directly.
+In CI, make sure your checkout step pulls submodules:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    submodules: true
+```
