@@ -33,12 +33,15 @@ Each SDK adds `arkade-regtest` as a git submodule at `regtest/`. Infrastructure 
 
 ### 1.1 `.env` Auto-Discovery Chain
 
-`start-env.sh` resolves configuration in this order (first found wins):
+`start-env.sh` always loads `.env.defaults` as the base, then layers the first override file found on top:
 
-1. Explicit `--env <path>` flag (highest priority)
-2. `../.env.regtest` (parent repo's override — the typical submodule case)
-3. `.env` (local override in arkade-regtest itself)
-4. `.env.defaults` (built-in fallback)
+1. `.env.defaults` is **always loaded first** (base configuration)
+2. Then the first override found (in priority order) is layered on top:
+   - Explicit `--env <path>` flag (highest priority)
+   - `../.env.regtest` (parent repo's override — the typical submodule case)
+   - `.env` (local override in arkade-regtest itself)
+
+Variables in the override file replace their `.env.defaults` counterparts; variables not in the override keep their defaults. This is a **new feature** — the current script only supports `--env <path>` and `.env.defaults`.
 
 ### 1.2 New Configurable Variables
 
@@ -48,16 +51,33 @@ Add to `.env.defaults`:
 # Arkd image overrides (empty = use nigiri's built-in arkd)
 ARKD_IMAGE=
 ARKD_WALLET_IMAGE=
-
-# Skip building nigiri from source, use system binary if available
-NIGIRI_USE_SYSTEM=false
 ```
 
-When `ARKD_IMAGE` is set, `start-env.sh` pulls and runs the specified image instead of relying on nigiri's bundled arkd.
+These variables must be exported in `start-env.sh` so they are available to docker-compose interpolation.
+
+Note: `NIGIRI_USE_SYSTEM` is **not** needed — the existing `NIGIRI_BRANCH` variable already controls this. When `NIGIRI_BRANCH` is set, nigiri is built from source; when empty, the system binary is used.
+
+### 1.2.1 ARKD_IMAGE Override Mechanism
+
+When `ARKD_IMAGE` is set (non-empty), `start-env.sh` performs the following:
+
+1. Start nigiri with `nigiri start --ark --ln` as normal (this creates the `nigiri` Docker network and starts Bitcoin, Esplora, etc.)
+2. Stop the nigiri-managed arkd and arkd-wallet containers: `docker stop ark ark-wallet`
+3. Start replacement containers via a new docker-compose overlay (`docker/docker-compose.arkd-override.yml`) that uses the `ARKD_IMAGE` and `ARKD_WALLET_IMAGE` values
+4. The override compose file joins the `nigiri` network and maps the same ports (7070, 6060) so all other services connect seamlessly
+
+When `ARKD_IMAGE` is empty (default), nigiri's built-in arkd is used as-is. No override compose file is started.
 
 ### 1.3 Idempotent Start
 
-`start-env.sh` detects if services are already running and skips redundant setup. Developers can re-run without `clean-env.sh` first.
+`start-env.sh` detects if services are already running and skips redundant setup:
+
+- **Nigiri**: Check if `docker ps | grep bitcoin` is running. If so, skip `nigiri start`.
+- **Arkd wallet**: Check if `nigiri ark wallet status` returns "initialized." If so, skip wallet creation/unlock/funding.
+- **Docker-compose overlay**: Check if boltz/fulmine containers exist. If so, skip `docker compose up`.
+- **LND channels**: Check if boltz-lnd has an active channel. If so, skip channel setup.
+
+If any service is in a broken state, `clean-env.sh && start-env.sh` is the recovery path.
 
 ### 1.4 Exit Codes & Summary
 
@@ -71,8 +91,10 @@ Regtest environment ready
   Esplora         http://localhost:3000
   Arkd            http://localhost:7070
   Ark Wallet      http://localhost:6060
-  Fulmine         http://localhost:7002
-  Boltz API       http://localhost:9069
+  Fulmine HTTP    http://localhost:7002
+  Fulmine API     http://localhost:7003
+  Boltz CORS      http://localhost:9069  (nginx proxy → boltz:9001)
+  Boltz gRPC      localhost:9000
   Boltz LND       localhost:10010
 
   Arkd password:  secret
@@ -172,7 +194,7 @@ Runner needs: `docker`, `go` (for nigiri build), `git` (for submodule checkout).
 - uses: actions/cache@v4
   with:
     path: regtest/_build
-    key: nigiri-${{ hashFiles('regtest/.env.defaults') }}
+    key: nigiri-${{ hashFiles('regtest/.env.defaults', '.env.regtest') }}
 
 - name: Start regtest environment
   run: ./regtest/start-env.sh
@@ -202,7 +224,7 @@ Runner needs: `docker`, `go` (for nigiri build), `git` (for submodule checkout).
 
 ### 3.5 Nigiri Build Caching
 
-Cache `regtest/_build/` keyed on `.env.defaults` hash to avoid rebuilding nigiri on every CI run.
+Cache `regtest/_build/` keyed on both `.env.defaults` and `.env.regtest` hashes to avoid rebuilding nigiri on every CI run while correctly invalidating when either config changes.
 
 ## Section 4: Developer Experience
 
