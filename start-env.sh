@@ -374,9 +374,10 @@ else
     max_attempts=30
     attempt=1
     while [ $attempt -le $max_attempts ]; do
-      # Check if arkd gRPC is responding (TCP open + nigiri CLI can connect)
-      if (echo > /dev/tcp/127.0.0.1/7070) 2>/dev/null && \
-         $NIGIRI ark init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>/dev/null; then
+      # Check arkd admin HTTP endpoint (port 7071) — works even with scratch images
+      if curl -sf http://localhost:7071/v1/admin/intentFees >/dev/null 2>&1; then
+        # Init ark CLI once arkd is serving
+        $NIGIRI ark init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>/dev/null || true
         log "arkd is ready"
         break
       fi
