@@ -235,8 +235,8 @@ setup_fulmine_wallet() {
 setup_delegator_wallet() {
   log "Setting up Fulmine delegator wallet..."
 
-  # Wait for delegator service to be ready
-  max_attempts=15
+  # Wait for delegator service to be ready (fulmine needs arkd to be fully serving)
+  max_attempts=30
   attempt=1
   while [ $attempt -le $max_attempts ]; do
     if curl -s http://localhost:${DELEGATOR_API_PORT}/api/v1/wallet/status >/dev/null 2>&1; then
