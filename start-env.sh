@@ -374,10 +374,11 @@ else
     max_attempts=30
     attempt=1
     while [ $attempt -le $max_attempts ]; do
-      # Check if arkd is responding (try wget inside container, fall back to host curl)
-      if docker exec ark wget -qO /dev/null http://localhost:7070/v1/info 2>/dev/null || \
-         curl -sf http://localhost:7070/v1/info >/dev/null 2>&1 || \
-         docker exec ark sh -c '(echo > /dev/tcp/localhost/7070) 2>/dev/null'; then
+      # Check if arkd is responding
+      ark_status=$(docker inspect ark --format '{{.State.Status}}' 2>/dev/null || echo "missing")
+      if [ "$ark_status" != "running" ]; then
+        log "ark container status: $ark_status (attempt $attempt/$max_attempts)"
+      elif docker exec ark wget -qO- http://127.0.0.1:7070/v1/info >/dev/null 2>&1; then
         log "arkd is ready"
         break
       fi
