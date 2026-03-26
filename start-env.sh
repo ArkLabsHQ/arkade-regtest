@@ -374,9 +374,10 @@ else
     max_attempts=30
     attempt=1
     while [ $attempt -le $max_attempts ]; do
-      # Check if arkd is responding (use grpc_health_probe-like TCP check from host)
-      if (echo > /dev/tcp/127.0.0.1/7070) 2>/dev/null; then
-        log "arkd is ready (port 7070 open)"
+      # Check if arkd gRPC is responding (TCP open + nigiri CLI can connect)
+      if (echo > /dev/tcp/127.0.0.1/7070) 2>/dev/null && \
+         $NIGIRI ark init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>/dev/null; then
+        log "arkd is ready"
         break
       fi
       log "Waiting for arkd... (attempt $attempt/$max_attempts)"
@@ -388,8 +389,7 @@ else
       exit 1
     fi
 
-    # Init ark CLI and fund wallet
-    $NIGIRI ark init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>/dev/null || true
+    # Fund wallet (ark init already done in health check loop above)
     $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
     $NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD"
   else
