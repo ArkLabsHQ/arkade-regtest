@@ -9,11 +9,8 @@ log() {
 }
 
 # ── Load environment ─────────────────────────────────────────────────────────
-source "$SCRIPT_DIR/.env.defaults"
-if [[ -n "${USER_ENV:-}" && -f "$USER_ENV" ]]; then
-  log "Loading user env from $USER_ENV"
-  source "$USER_ENV"
-fi
+source "$SCRIPT_DIR/lib/env.sh"
+load_env "$SCRIPT_DIR"
 
 # ── Resolve nigiri binary ────────────────────────────────────────────────────
 if [[ -n "${NIGIRI_BRANCH:-}" ]]; then
@@ -22,6 +19,18 @@ elif command -v nigiri &>/dev/null; then
   NIGIRI="nigiri"
 else
   NIGIRI="$SCRIPT_DIR/_build/nigiri/build/nigiri"
+fi
+
+# ── Export vars for docker-compose interpolation ─────────────────────────────
+export ARKD_IMAGE ARKD_WALLET_IMAGE
+export BOLTZ_LND_IMAGE FULMINE_IMAGE BOLTZ_IMAGE NGINX_IMAGE
+export BOLTZ_LND_P2P_PORT BOLTZ_LND_RPC_PORT FULMINE_HTTP_PORT FULMINE_API_PORT
+export BOLTZ_GRPC_PORT BOLTZ_API_PORT BOLTZ_WS_PORT NGINX_PORT
+
+# ── Stop arkd override if custom image was used ──────────────────────────────
+if docker ps --format '{{.Names}}' | grep -q '^ark$' && \
+   [ -n "$(docker inspect ark --format '{{.Config.Image}}' 2>/dev/null | grep -v 'nigiri')" ]; then
+  docker compose -f "$SCRIPT_DIR/docker/docker-compose.arkd-override.yml" stop 2>/dev/null || true
 fi
 
 # ── Stop ark overlay stack ───────────────────────────────────────────────────

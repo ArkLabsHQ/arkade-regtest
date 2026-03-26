@@ -3,13 +3,17 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# ── Verify script is not running from an empty submodule ─────────────────────
+if [ ! -f "$SCRIPT_DIR/.env.defaults" ]; then
+  echo "ERROR: $SCRIPT_DIR/.env.defaults not found."
+  echo "If this is a git submodule, run: git submodule update --init"
+  exit 1
+fi
+
 # ── Logging ──────────────────────────────────────────────────────────────────
 log() {
   echo -e "\033[0;32m[$(date '+%H:%M:%S')] $1\033[0m"
 }
-
-# ── Load defaults ────────────────────────────────────────────────────────────
-source "$SCRIPT_DIR/.env.defaults"
 
 # ── Parse arguments ──────────────────────────────────────────────────────────
 CLEAN=false
@@ -32,14 +36,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# ── Load user overrides ─────────────────────────────────────────────────────
-if [ -n "$USER_ENV" ] && [ -f "$USER_ENV" ]; then
-  log "Loading user env from $USER_ENV"
-  source "$USER_ENV"
-fi
+# ── Load environment ────────────────────────────────────────────────────────
+source "$SCRIPT_DIR/lib/env.sh"
+load_env "$SCRIPT_DIR"
 
 # ── Export vars for docker-compose interpolation ─────────────────────────────
 export BOLTZ_LND_IMAGE FULMINE_IMAGE BOLTZ_IMAGE NGINX_IMAGE
+export ARKD_IMAGE ARKD_WALLET_IMAGE
 export BOLTZ_LND_P2P_PORT BOLTZ_LND_RPC_PORT FULMINE_HTTP_PORT FULMINE_API_PORT
 export BOLTZ_GRPC_PORT BOLTZ_API_PORT BOLTZ_WS_PORT NGINX_PORT
 
@@ -241,50 +244,91 @@ if [ "$CLEAN" = true ]; then
 fi
 
 # ── Pull and start Nigiri ────────────────────────────────────────────────────
-log "Pulling latest Nigiri images..."
-$NIGIRI update || log "Nigiri update failed, continuing with existing images..."
+if docker ps --format '{{.Names}}' | grep -q '^bitcoin$'; then
+  log "Nigiri already running, skipping start..."
+else
+  log "Pulling latest Nigiri images..."
+  $NIGIRI update || log "Nigiri update failed, continuing with existing images..."
 
-log "Starting Nigiri with Ark and LN support..."
-$NIGIRI start --ark --ln || log "Nigiri may already be running, continuing..."
+  log "Starting Nigiri with Ark and LN support..."
+  $NIGIRI start --ark --ln || log "Nigiri may already be running, continuing..."
 
-# ── Bitcoin Core low-fee config ──────────────────────────────────────────────
-log "Configuring Bitcoin Core to accept low-fee transactions..."
-docker exec bitcoin sh -c 'printf "\nminrelaytxfee=0.0\nmintxfee=0.0\n" >> /data/.bitcoin/bitcoin.conf'
-docker restart bitcoin
-sleep 3
-log "Bitcoin Core restarted with minrelaytxfee=0 and mintxfee=0"
-
-# ── Docker compose overlay ──────────────────────────────────────────────────
-log "Pulling latest custom Ark stack images..."
-docker compose -f "$SCRIPT_DIR/docker/docker-compose.ark.yml" pull
-
-log "Starting ark stack..."
-docker compose -f "$SCRIPT_DIR/docker/docker-compose.ark.yml" up -d
-
-# ── Wait for arkd and init wallet ────────────────────────────────────────────
-log "Waiting for arkd to be ready..."
-max_attempts=30
-attempt=1
-while [ $attempt -le $max_attempts ]; do
-  if $NIGIRI ark init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>/dev/null; then
-    log "arkd wallet initialized"
-    break
-  fi
-  log "Waiting for arkd... (attempt $attempt/$max_attempts)"
+  # ── Bitcoin Core low-fee config ──────────────────────────────────────────
+  log "Configuring Bitcoin Core to accept low-fee transactions..."
+  docker exec bitcoin sh -c 'printf "\nminrelaytxfee=0.0\nmintxfee=0.0\n" >> /data/.bitcoin/bitcoin.conf'
+  docker restart bitcoin
   sleep 3
-  ((attempt++))
-done
-if [ $attempt -gt $max_attempts ]; then
-  log "ERROR: arkd failed to start within expected time"
-  exit 1
+  log "Bitcoin Core restarted with minrelaytxfee=0 and mintxfee=0"
 fi
 
-$NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
-$NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD"
+# ── Override arkd if custom image specified ──────────────────────────────────
+if [ -n "${ARKD_IMAGE:-}" ]; then
+  if docker ps --format '{{.Names}}' | grep -q '^ark$' && \
+     [ "$(docker inspect ark --format '{{.Config.Image}}')" = "$ARKD_IMAGE" ]; then
+    log "Custom arkd already running with correct image, skipping..."
+  else
+    log "Custom ARKD_IMAGE set: $ARKD_IMAGE"
+    docker stop ark ark-wallet 2>/dev/null || true
+    docker rm ark ark-wallet 2>/dev/null || true
+    docker compose -f "$SCRIPT_DIR/docker/docker-compose.arkd-override.yml" pull
+    docker compose -f "$SCRIPT_DIR/docker/docker-compose.arkd-override.yml" up -d
+    sleep 5
+  fi
+fi
 
-# ── Setup services ───────────────────────────────────────────────────────────
-setup_fulmine_wallet
-setup_lnd_wallet
+# ── Docker compose overlay ──────────────────────────────────────────────────
+if docker ps --format '{{.Names}}' | grep -q '^boltz$'; then
+  log "Ark stack already running, skipping..."
+else
+  log "Pulling latest custom Ark stack images..."
+  docker compose -f "$SCRIPT_DIR/docker/docker-compose.ark.yml" pull
+  log "Starting ark stack..."
+  docker compose -f "$SCRIPT_DIR/docker/docker-compose.ark.yml" up -d
+fi
+
+# ── Wait for arkd and init wallet ────────────────────────────────────────────
+arkd_ready=$(curl -s http://localhost:7070/v1/info 2>/dev/null | jq -r '.pubkey // empty' 2>/dev/null || echo "")
+if [ -n "$arkd_ready" ]; then
+  log "arkd wallet already initialized, skipping..."
+else
+  log "Waiting for arkd to be ready..."
+  max_attempts=30
+  attempt=1
+  while [ $attempt -le $max_attempts ]; do
+    if $NIGIRI ark init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>/dev/null; then
+      log "arkd wallet initialized"
+      break
+    fi
+    log "Waiting for arkd... (attempt $attempt/$max_attempts)"
+    sleep 3
+    ((attempt++))
+  done
+  if [ $attempt -gt $max_attempts ]; then
+    log "ERROR: arkd failed to start within expected time"
+    exit 1
+  fi
+
+  $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
+  $NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD"
+fi
+
+# ── Setup services (idempotent) ─────────────────────────────────────────────
+# Fulmine: check if wallet already exists
+fulmine_status=$(curl -s http://localhost:${FULMINE_API_PORT}/api/v1/wallet/status 2>/dev/null || echo "")
+if echo "$fulmine_status" | jq -e '.initialized' 2>/dev/null | grep -q 'true'; then
+  log "Fulmine wallet already initialized, skipping..."
+else
+  setup_fulmine_wallet
+fi
+
+# LND: check if channel already exists
+channel_count=$(docker exec boltz-lnd lncli --network=regtest listchannels 2>/dev/null | jq '.channels | length' 2>/dev/null || echo "0")
+if [ "$channel_count" -gt 0 ]; then
+  log "LND channel already open, skipping setup..."
+else
+  setup_lnd_wallet
+fi
+
 setup_arkd_fees
 
 # ── Wait for boltz-lnd, restart boltz, verify pairs ─────────────────────────
@@ -328,15 +372,23 @@ if [ $attempt -gt $max_attempts ]; then
 fi
 
 # ── Done ─────────────────────────────────────────────────────────────────────
-log "Development environment ready."
-log "\nServices available at:\n"
-log "Ark wallet: http://localhost:6060"
-log "Ark daemon: http://localhost:7070"
-log "Boltz API: http://localhost:${BOLTZ_API_PORT}"
-log "Boltz WebSocket: ws://localhost:${BOLTZ_WS_PORT}"
-log "CORS proxy: http://localhost:${NGINX_PORT}"
-log "Fulmine: http://localhost:${FULMINE_HTTP_PORT}"
-log "LND (nigiri): localhost:10009"
-log "boltz-lnd: localhost:${BOLTZ_LND_RPC_PORT}"
-log "Chopsticks (Bitcoin explorer): http://localhost:3000"
-log "NBXplorer: http://localhost:32838"
+echo ""
+echo "========================================"
+echo " Regtest environment ready"
+echo "========================================"
+echo ""
+echo "  Bitcoin RPC     http://localhost:18443"
+echo "  Esplora         http://localhost:3000"
+echo "  Arkd            http://localhost:7070"
+echo "  Ark Wallet      http://localhost:6060"
+echo "  Fulmine HTTP    http://localhost:${FULMINE_HTTP_PORT}"
+echo "  Fulmine API     http://localhost:${FULMINE_API_PORT}"
+echo "  Boltz CORS      http://localhost:${NGINX_PORT}  (nginx proxy)"
+echo "  Boltz gRPC      localhost:${BOLTZ_GRPC_PORT}"
+echo "  Boltz LND       localhost:${BOLTZ_LND_RPC_PORT}"
+echo ""
+echo "  Arkd password:  ${ARKD_PASSWORD}"
+if [ -n "${ARKD_IMAGE:-}" ]; then
+  echo "  Arkd image:     ${ARKD_IMAGE}"
+fi
+echo ""

@@ -1,0 +1,44 @@
+# Used when ARKD_IMAGE is set to override nigiri's built-in arkd.
+# start-env.sh stops nigiri's arkd containers and starts these instead.
+name: nigiri
+services:
+  ark-wallet:
+    image: ${ARKD_WALLET_IMAGE}
+    container_name: ark-wallet
+    restart: unless-stopped
+    environment:
+      - ARKD_WALLET_NBXPLORER_URL=http://nbxplorer:32838
+    ports:
+      - '6060:6060'
+    volumes:
+      - ark_wallet_datadir:/app/wallet-data
+
+  ark:
+    image: ${ARKD_IMAGE}
+    container_name: ark
+    restart: unless-stopped
+    depends_on:
+      - ark-wallet
+    environment:
+      - ARKD_NO_TLS=true
+      - ARKD_NO_MACAROONS=true
+      - ARKD_WALLET_ADDR=ark-wallet:6060
+      - ARKD_ESPLORA_URL=http://chopsticks:3000
+      - ARKD_VTXO_MIN_AMOUNT=1
+      - ARKD_DB_TYPE=sqlite
+      - ARKD_EVENT_DB_TYPE=badger
+      - ARKD_UNLOCKER_PASSWORD=${ARKD_PASSWORD:-secret}
+    ports:
+      - '7070:7070'
+      - '7071:7071'
+    volumes:
+      - ark_datadir:/app/data
+
+volumes:
+  ark_wallet_datadir:
+  ark_datadir:
+
+networks:
+  default:
+    name: nigiri
+    external: true
