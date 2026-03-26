@@ -8,6 +8,7 @@ services:
     restart: unless-stopped
     environment:
       - ARKD_WALLET_NBXPLORER_URL=http://nbxplorer:32838
+      - ARKD_WALLET_NETWORK=regtest
       - ARKD_WALLET_SIGNER_KEY=${ARKD_WALLET_SIGNER_KEY:-}
     ports:
       - '6060:6060'
@@ -28,6 +29,7 @@ services:
       - ARKD_VTXO_MIN_AMOUNT=1
       - ARKD_DB_TYPE=sqlite
       - ARKD_EVENT_DB_TYPE=badger
+      - ARKD_UNLOCKER_TYPE=env
       - ARKD_UNLOCKER_PASSWORD=${ARKD_PASSWORD:-secret}
       - ARKD_SCHEDULER_TYPE=${ARKD_SCHEDULER_TYPE:-block}
       - ARKD_ALLOW_CSV_BLOCK_TYPE=${ARKD_ALLOW_CSV_BLOCK_TYPE:-false}
