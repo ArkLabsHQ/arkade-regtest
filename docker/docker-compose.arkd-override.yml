@@ -8,6 +8,7 @@ services:
     restart: unless-stopped
     environment:
       - ARKD_WALLET_NBXPLORER_URL=http://nbxplorer:32838
+      - ARKD_WALLET_SIGNER_KEY=${ARKD_WALLET_SIGNER_KEY:-}
     ports:
       - '6060:6060'
     volumes:
