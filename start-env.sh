@@ -231,6 +231,83 @@ setup_fulmine_wallet() {
   log "Fulmine wallet setup completed successfully!"
 }
 
+# ── Helper: setup_delegator_wallet ───────────────────────────────────────────
+setup_delegator_wallet() {
+  log "Setting up Fulmine delegator wallet..."
+
+  # Wait for delegator service to be ready
+  max_attempts=15
+  attempt=1
+  while [ $attempt -le $max_attempts ]; do
+    if curl -s http://localhost:${DELEGATOR_API_PORT}/api/v1/wallet/status >/dev/null 2>&1; then
+      log "Delegator service is ready!"
+      break
+    fi
+    log "Waiting for delegator service... (attempt $attempt/$max_attempts)"
+    sleep 2
+    ((attempt++))
+  done
+
+  if [ $attempt -gt $max_attempts ]; then
+    log "ERROR: Delegator service failed to start within expected time"
+    exit 1
+  fi
+
+  # Generate seed and create wallet
+  log "Generating delegator seed..."
+  seed_response=$(curl -s -X GET http://localhost:${DELEGATOR_API_PORT}/api/v1/wallet/genseed)
+  private_key=$(echo "$seed_response" | jq -r '.nsec')
+
+  log "Creating delegator wallet..."
+  curl -s -X POST http://localhost:${DELEGATOR_API_PORT}/api/v1/wallet/create \
+       -H "Content-Type: application/json" \
+       -d "{\"private_key\": \"$private_key\", \"password\": \"password\", \"server_url\": \"http://ark:7070\"}"
+
+  log "Unlocking delegator wallet..."
+  curl -s -X POST http://localhost:${DELEGATOR_API_PORT}/api/v1/wallet/unlock \
+       -H "Content-Type: application/json" \
+       -d '{"password": "password"}'
+
+  # Fund delegator wallet
+  log "Getting delegator address..."
+  max_attempts=5
+  attempt=1
+  local delegator_address=""
+  while [ $attempt -le $max_attempts ]; do
+    local address_response=$(curl -s -X GET http://localhost:${DELEGATOR_API_PORT}/api/v1/address)
+    delegator_address=$(echo "$address_response" | jq -r '.address' | sed 's/bitcoin://' | sed 's/?ark=.*//')
+    if [[ "$delegator_address" != "null" && -n "$delegator_address" ]]; then
+      break
+    fi
+    log "Address not ready yet (attempt $attempt/$max_attempts), waiting..."
+    sleep 2
+    ((attempt++))
+  done
+
+  if [[ "$delegator_address" == "null" || -z "$delegator_address" ]]; then
+    log "ERROR: Failed to get delegator address"
+    exit 1
+  fi
+
+  log "Delegator address: $delegator_address"
+  $NIGIRI faucet "$delegator_address" 0.01
+
+  # Mine blocks to confirm boarding UTXO before settling
+  log "Mining blocks for delegator boarding confirmation..."
+  $NIGIRI rpc generatetoaddress 3 "$($NIGIRI rpc getnewaddress)"
+  sleep 5
+
+  log "Settling delegator wallet..."
+  curl -s -X GET http://localhost:${DELEGATOR_API_PORT}/api/v1/settle
+
+  # Wait for batch round and mine commitment tx
+  sleep 15
+  $NIGIRI rpc generatetoaddress 3 "$($NIGIRI rpc getnewaddress)"
+  sleep 3
+
+  log "Delegator wallet setup completed!"
+}
+
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════════════════════
@@ -321,6 +398,14 @@ else
   setup_fulmine_wallet
 fi
 
+# Delegator: check if wallet already exists
+delegator_status=$(curl -s http://localhost:${DELEGATOR_API_PORT}/api/v1/wallet/status 2>/dev/null || echo "")
+if echo "$delegator_status" | jq -e '.initialized' 2>/dev/null | grep -q 'true'; then
+  log "Delegator wallet already initialized, skipping..."
+else
+  setup_delegator_wallet
+fi
+
 # LND: check if channel already exists
 channel_count=$(docker exec boltz-lnd lncli --network=regtest listchannels 2>/dev/null | jq '.channels | length' 2>/dev/null || echo "0")
 if [ "$channel_count" -gt 0 ]; then
@@ -383,6 +468,9 @@ echo "  Arkd            http://localhost:7070"
 echo "  Ark Wallet      http://localhost:6060"
 echo "  Fulmine HTTP    http://localhost:${FULMINE_HTTP_PORT}"
 echo "  Fulmine API     http://localhost:${FULMINE_API_PORT}"
+echo "  Delegator gRPC  localhost:${DELEGATOR_GRPC_PORT}"
+echo "  Delegator API   http://localhost:${DELEGATOR_API_PORT}"
+echo "  Delegator HTTP  http://localhost:${DELEGATOR_HTTP_PORT}"
 echo "  Boltz CORS      http://localhost:${NGINX_PORT}  (nginx proxy)"
 echo "  Boltz gRPC      localhost:${BOLTZ_GRPC_PORT}"
 echo "  Boltz LND       localhost:${BOLTZ_LND_RPC_PORT}"
