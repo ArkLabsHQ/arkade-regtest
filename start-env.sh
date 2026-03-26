@@ -369,16 +369,14 @@ if [ -n "$arkd_ready" ]; then
   log "arkd wallet already initialized, skipping..."
 else
   if [ -n "${ARKD_IMAGE:-}" ]; then
-    # Custom arkd with UNLOCKER_TYPE=env auto-creates wallet; just wait for HTTP
-    log "Waiting for custom arkd to be ready..."
+    # Custom arkd with UNLOCKER_TYPE=env auto-creates wallet
+    # Step 1: wait for admin HTTP endpoint
+    log "Waiting for custom arkd admin endpoint..."
     max_attempts=30
     attempt=1
     while [ $attempt -le $max_attempts ]; do
-      # Check arkd admin HTTP endpoint (port 7071) — works even with scratch images
       if curl -sf http://localhost:7071/v1/admin/intentFees >/dev/null 2>&1; then
-        # Init ark CLI once arkd is serving
-        $NIGIRI ark init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>/dev/null || true
-        log "arkd is ready"
+        log "arkd admin endpoint is up"
         break
       fi
       log "Waiting for arkd... (attempt $attempt/$max_attempts)"
@@ -390,7 +388,21 @@ else
       exit 1
     fi
 
-    # Fund wallet (ark init already done in health check loop above)
+    # Step 2: init ark CLI (retry until gRPC is ready)
+    log "Initializing ark CLI..."
+    max_attempts=15
+    attempt=1
+    while [ $attempt -le $max_attempts ]; do
+      if $NIGIRI ark init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>/dev/null; then
+        log "ark CLI initialized"
+        break
+      fi
+      log "ark CLI init retry... (attempt $attempt/$max_attempts)"
+      sleep 2
+      ((attempt++))
+    done
+
+    # Step 3: fund wallet
     $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
     $NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD"
   else
