@@ -368,25 +368,51 @@ arkd_ready=$(curl -s http://localhost:7070/v1/info 2>/dev/null | jq -r '.pubkey 
 if [ -n "$arkd_ready" ]; then
   log "arkd wallet already initialized, skipping..."
 else
-  log "Waiting for arkd to be ready..."
-  max_attempts=30
-  attempt=1
-  while [ $attempt -le $max_attempts ]; do
-    if $NIGIRI ark init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>/dev/null; then
-      log "arkd wallet initialized"
-      break
+  if [ -n "${ARKD_IMAGE:-}" ]; then
+    # Custom arkd with UNLOCKER_TYPE=env auto-creates wallet; just wait for HTTP
+    log "Waiting for custom arkd to be ready..."
+    max_attempts=30
+    attempt=1
+    while [ $attempt -le $max_attempts ]; do
+      if curl -s http://localhost:7070/v1/info 2>/dev/null | jq -e '.pubkey' >/dev/null 2>&1; then
+        log "arkd is ready"
+        break
+      fi
+      log "Waiting for arkd... (attempt $attempt/$max_attempts)"
+      sleep 3
+      ((attempt++))
+    done
+    if [ $attempt -gt $max_attempts ]; then
+      log "ERROR: arkd failed to start within expected time"
+      exit 1
     fi
-    log "Waiting for arkd... (attempt $attempt/$max_attempts)"
-    sleep 3
-    ((attempt++))
-  done
-  if [ $attempt -gt $max_attempts ]; then
-    log "ERROR: arkd failed to start within expected time"
-    exit 1
-  fi
 
-  $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
-  $NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD"
+    # Init ark CLI and fund wallet
+    $NIGIRI ark init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>/dev/null || true
+    $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
+    $NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD"
+  else
+    # Nigiri's built-in arkd — use nigiri CLI for wallet init
+    log "Waiting for arkd to be ready..."
+    max_attempts=30
+    attempt=1
+    while [ $attempt -le $max_attempts ]; do
+      if $NIGIRI ark init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>/dev/null; then
+        log "arkd wallet initialized"
+        break
+      fi
+      log "Waiting for arkd... (attempt $attempt/$max_attempts)"
+      sleep 3
+      ((attempt++))
+    done
+    if [ $attempt -gt $max_attempts ]; then
+      log "ERROR: arkd failed to start within expected time"
+      exit 1
+    fi
+
+    $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
+    $NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD"
+  fi
 fi
 
 # ── Setup services (idempotent) ─────────────────────────────────────────────
