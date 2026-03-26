@@ -343,17 +343,13 @@ fi
 
 # ── Override arkd if custom image specified ──────────────────────────────────
 if [ -n "${ARKD_IMAGE:-}" ]; then
-  if docker ps --format '{{.Names}}' | grep -q '^ark$' && \
-     [ "$(docker inspect ark --format '{{.Config.Image}}')" = "$ARKD_IMAGE" ]; then
-    log "Custom arkd already running with correct image, skipping..."
-  else
-    log "Custom ARKD_IMAGE set: $ARKD_IMAGE"
-    docker stop ark ark-wallet 2>/dev/null || true
-    docker rm ark ark-wallet 2>/dev/null || true
-    docker compose -f "$SCRIPT_DIR/docker/docker-compose.arkd-override.yml" pull
-    docker compose -f "$SCRIPT_DIR/docker/docker-compose.arkd-override.yml" up -d
-    sleep 5
-  fi
+  log "Custom ARKD_IMAGE set: $ARKD_IMAGE"
+  # Always recreate with override compose to ensure custom env vars are applied
+  docker stop ark ark-wallet 2>/dev/null || true
+  docker rm ark ark-wallet 2>/dev/null || true
+  docker compose -f "$SCRIPT_DIR/docker/docker-compose.arkd-override.yml" pull
+  docker compose -f "$SCRIPT_DIR/docker/docker-compose.arkd-override.yml" up -d
+  sleep 5
 fi
 
 # ── Docker compose overlay ──────────────────────────────────────────────────
