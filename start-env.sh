@@ -388,9 +388,9 @@ else
       exit 1
     fi
 
-    # Step 2: init ark CLI (retry until gRPC is ready)
+    # Step 2: init ark CLI (retry until gRPC is ready — wallet sync may take time)
     log "Initializing ark CLI..."
-    max_attempts=15
+    max_attempts=30
     attempt=1
     while [ $attempt -le $max_attempts ]; do
       if $NIGIRI ark init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>/dev/null; then
@@ -398,9 +398,13 @@ else
         break
       fi
       log "ark CLI init retry... (attempt $attempt/$max_attempts)"
-      sleep 2
+      sleep 3
       ((attempt++))
     done
+    if [ $attempt -gt $max_attempts ]; then
+      log "ERROR: ark CLI failed to initialize"
+      exit 1
+    fi
 
     # Step 3: fund wallet
     $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
