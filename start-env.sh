@@ -374,7 +374,7 @@ else
     max_attempts=30
     attempt=1
     while [ $attempt -le $max_attempts ]; do
-      if curl -sf http://localhost:7070/v1/info >/dev/null 2>&1; then
+      if docker exec ark wget -qO- http://localhost:7070/v1/info >/dev/null 2>&1; then
         log "arkd is ready"
         break
       fi
