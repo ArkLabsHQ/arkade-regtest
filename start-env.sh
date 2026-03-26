@@ -374,12 +374,9 @@ else
     max_attempts=30
     attempt=1
     while [ $attempt -le $max_attempts ]; do
-      # Check if arkd is responding
-      ark_status=$(docker inspect ark --format '{{.State.Status}}' 2>/dev/null || echo "missing")
-      if [ "$ark_status" != "running" ]; then
-        log "ark container status: $ark_status (attempt $attempt/$max_attempts)"
-      elif docker exec ark wget -qO- http://127.0.0.1:7070/v1/info >/dev/null 2>&1; then
-        log "arkd is ready"
+      # Check if arkd is responding (use grpc_health_probe-like TCP check from host)
+      if (echo > /dev/tcp/127.0.0.1/7070) 2>/dev/null; then
+        log "arkd is ready (port 7070 open)"
         break
       fi
       log "Waiting for arkd... (attempt $attempt/$max_attempts)"
