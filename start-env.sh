@@ -340,6 +340,23 @@ else
   docker restart bitcoin
   sleep 3
   log "Bitcoin Core restarted with minrelaytxfee=0 and mintxfee=0"
+
+  # Wait for chain indexing to stabilize after bitcoin restart
+  log "Waiting for chain indexing to stabilize..."
+  max_attempts=30
+  attempt=1
+  while [ $attempt -le $max_attempts ]; do
+    if curl -sf http://localhost:3000/api/blocks/tip/height >/dev/null 2>&1; then
+      log "Chain indexing is ready (chopsticks responding)"
+      break
+    fi
+    log "Chain indexing not ready yet... (attempt $attempt/$max_attempts)"
+    sleep 2
+    ((attempt++))
+  done
+  if [ $attempt -gt $max_attempts ]; then
+    log "WARNING: Chain indexing did not stabilize, continuing anyway..."
+  fi
 fi
 
 # ── Override arkd if custom image specified ──────────────────────────────────
@@ -350,7 +367,23 @@ if [ -n "${ARKD_IMAGE:-}" ]; then
   docker rm ark ark-wallet 2>/dev/null || true
   docker compose -f "$SCRIPT_DIR/docker/docker-compose.arkd-override.yml" pull
   docker compose -f "$SCRIPT_DIR/docker/docker-compose.arkd-override.yml" up -d
-  sleep 5
+
+  # Wait for ark-wallet to connect to nbxplorer before checking arkd
+  log "Waiting for ark-wallet to be ready..."
+  max_attempts=30
+  attempt=1
+  while [ $attempt -le $max_attempts ]; do
+    if curl -sf http://localhost:6060 >/dev/null 2>&1; then
+      log "ark-wallet is responding"
+      break
+    fi
+    sleep 2
+    ((attempt++))
+  done
+  if [ $attempt -gt $max_attempts ]; then
+    log "WARNING: ark-wallet not responding, dumping logs..."
+    docker logs ark-wallet 2>&1 | tail -30
+  fi
 fi
 
 # ── Docker compose overlay ──────────────────────────────────────────────────
@@ -402,7 +435,11 @@ else
       ((attempt++))
     done
     if [ $attempt -gt $max_attempts ]; then
-      log "ERROR: ark CLI failed to initialize"
+      log "ERROR: ark CLI failed to initialize — dumping diagnostics"
+      log "=== ark-wallet logs (last 30 lines) ==="
+      docker logs ark-wallet 2>&1 | tail -30
+      log "=== arkd logs (last 30 lines) ==="
+      docker logs ark 2>&1 | tail -30
       exit 1
     fi
 
