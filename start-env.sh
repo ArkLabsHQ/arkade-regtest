@@ -326,40 +326,20 @@ if [ "$CLEAN" = true ]; then
 fi
 
 # ── Pull and start Nigiri ────────────────────────────────────────────────────
+NIGIRI_FRESH=false
 if docker ps --format '{{.Names}}' | grep -q '^bitcoin$'; then
   log "Nigiri already running, skipping start..."
 else
+  NIGIRI_FRESH=true
   log "Pulling latest Nigiri images..."
   $NIGIRI update || log "Nigiri update failed, continuing with existing images..."
 
   log "Starting Nigiri with Ark and LN support..."
   $NIGIRI start --ark --ln || log "Nigiri may already be running, continuing..."
-
-  # ── Bitcoin Core low-fee config ──────────────────────────────────────────
-  log "Configuring Bitcoin Core to accept low-fee transactions..."
-  docker exec bitcoin sh -c 'printf "\nminrelaytxfee=0.0\nmintxfee=0.0\n" >> /data/.bitcoin/bitcoin.conf'
-  docker restart bitcoin
-  sleep 3
-  log "Bitcoin Core restarted with minrelaytxfee=0 and mintxfee=0"
-
-  # Wait for Bitcoin RPC to stabilize after restart
-  log "Waiting for Bitcoin Core to be ready after restart..."
-  max_attempts=15
-  attempt=1
-  while [ $attempt -le $max_attempts ]; do
-    if docker exec bitcoin bitcoin-cli -regtest getblockchaininfo >/dev/null 2>&1; then
-      log "Bitcoin Core is ready"
-      break
-    fi
-    sleep 2
-    ((attempt++))
-  done
-  if [ $attempt -gt $max_attempts ]; then
-    log "WARNING: Bitcoin Core not responding after restart, continuing..."
-  fi
 fi
 
 # ── Override arkd if custom image specified ──────────────────────────────────
+# Must happen BEFORE bitcoin restart so nbxplorer is stable during arkd init
 if [ -n "${ARKD_IMAGE:-}" ]; then
   log "Custom ARKD_IMAGE set: $ARKD_IMAGE"
   # Always recreate with override compose to ensure custom env vars are applied
@@ -367,23 +347,7 @@ if [ -n "${ARKD_IMAGE:-}" ]; then
   docker rm ark ark-wallet 2>/dev/null || true
   docker compose -f "$SCRIPT_DIR/docker/docker-compose.arkd-override.yml" pull
   docker compose -f "$SCRIPT_DIR/docker/docker-compose.arkd-override.yml" up -d
-
-  # Wait for ark-wallet to connect to nbxplorer before checking arkd
-  log "Waiting for ark-wallet to be ready..."
-  max_attempts=30
-  attempt=1
-  while [ $attempt -le $max_attempts ]; do
-    if curl -sf http://localhost:6060 >/dev/null 2>&1; then
-      log "ark-wallet is responding"
-      break
-    fi
-    sleep 2
-    ((attempt++))
-  done
-  if [ $attempt -gt $max_attempts ]; then
-    log "WARNING: ark-wallet not responding, dumping logs..."
-    docker logs ark-wallet 2>&1 | tail -30
-  fi
+  sleep 5
 fi
 
 # ── Docker compose overlay ──────────────────────────────────────────────────
@@ -467,6 +431,29 @@ else
 
     $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
     $NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD"
+  fi
+fi
+
+# ── Bitcoin Core low-fee config (after arkd init to avoid disrupting nbxplorer) ──
+if [ "$NIGIRI_FRESH" = true ]; then
+  log "Configuring Bitcoin Core to accept low-fee transactions..."
+  docker exec bitcoin sh -c 'printf "\nminrelaytxfee=0.0\nmintxfee=0.0\n" >> /data/.bitcoin/bitcoin.conf'
+  docker restart bitcoin
+  sleep 3
+  log "Bitcoin Core restarted with minrelaytxfee=0 and mintxfee=0"
+  log "Waiting for Bitcoin Core to be ready after restart..."
+  max_attempts=15
+  attempt=1
+  while [ $attempt -le $max_attempts ]; do
+    if docker exec bitcoin bitcoin-cli -regtest getblockchaininfo >/dev/null 2>&1; then
+      log "Bitcoin Core is ready"
+      break
+    fi
+    sleep 2
+    ((attempt++))
+  done
+  if [ $attempt -gt $max_attempts ]; then
+    log "WARNING: Bitcoin Core not responding after restart, continuing..."
   fi
 fi
 
