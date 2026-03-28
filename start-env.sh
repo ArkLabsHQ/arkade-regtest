@@ -339,9 +339,28 @@ else
 fi
 
 # ── Override arkd if custom image specified ──────────────────────────────────
-# Must happen BEFORE bitcoin restart so nbxplorer is stable during arkd init
 if [ -n "${ARKD_IMAGE:-}" ]; then
   log "Custom ARKD_IMAGE set: $ARKD_IMAGE"
+
+  # Wait for nbxplorer to be synced before starting custom arkd
+  log "Waiting for nbxplorer to be ready..."
+  max_attempts=30
+  attempt=1
+  while [ $attempt -le $max_attempts ]; do
+    sync_status=$(docker exec nbxplorer curl -sf http://localhost:32838/v1/cryptos/btc/status 2>/dev/null || echo "{}")
+    is_synced=$(echo "$sync_status" | jq -r '.isFullySynced // false' 2>/dev/null || echo "false")
+    if [ "$is_synced" = "true" ]; then
+      log "nbxplorer is fully synced"
+      break
+    fi
+    log "nbxplorer not synced yet (attempt $attempt/$max_attempts)"
+    sleep 3
+    ((attempt++))
+  done
+  if [ $attempt -gt $max_attempts ]; then
+    log "WARNING: nbxplorer may not be fully synced, continuing anyway..."
+  fi
+
   # Always recreate with override compose to ensure custom env vars are applied
   docker stop ark ark-wallet 2>/dev/null || true
   docker rm ark ark-wallet 2>/dev/null || true
@@ -381,7 +400,15 @@ else
       ((attempt++))
     done
     if [ $attempt -gt $max_attempts ]; then
-      log "ERROR: arkd failed to start within expected time"
+      log "ERROR: arkd admin endpoint failed to respond — dumping diagnostics"
+      log "=== ark container status ==="
+      docker ps -a --filter name=ark --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>&1
+      log "=== ark-wallet logs (last 30 lines) ==="
+      docker logs ark-wallet 2>&1 | tail -30
+      log "=== arkd logs (last 30 lines) ==="
+      docker logs ark 2>&1 | tail -30
+      log "=== nbxplorer sync status ==="
+      docker exec nbxplorer curl -sf http://localhost:32838/v1/cryptos/btc/status 2>&1 || echo "nbxplorer unreachable"
       exit 1
     fi
 
@@ -400,10 +427,12 @@ else
     done
     if [ $attempt -gt $max_attempts ]; then
       log "ERROR: ark CLI failed to initialize — dumping diagnostics"
-      log "=== ark-wallet logs (last 30 lines) ==="
-      docker logs ark-wallet 2>&1 | tail -30
-      log "=== arkd logs (last 30 lines) ==="
-      docker logs ark 2>&1 | tail -30
+      log "=== ark-wallet logs (last 50 lines) ==="
+      docker logs ark-wallet 2>&1 | tail -50
+      log "=== arkd logs (last 50 lines) ==="
+      docker logs ark 2>&1 | tail -50
+      log "=== nbxplorer sync status ==="
+      docker exec nbxplorer curl -sf http://localhost:32838/v1/cryptos/btc/status 2>&1 || echo "nbxplorer unreachable"
       exit 1
     fi
 
