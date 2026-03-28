@@ -342,25 +342,6 @@ fi
 if [ -n "${ARKD_IMAGE:-}" ]; then
   log "Custom ARKD_IMAGE set: $ARKD_IMAGE"
 
-  # Wait for nbxplorer to be synced before starting custom arkd
-  log "Waiting for nbxplorer to be ready..."
-  max_attempts=30
-  attempt=1
-  while [ $attempt -le $max_attempts ]; do
-    sync_status=$(curl -sf http://localhost:32838/v1/cryptos/btc/status 2>/dev/null || echo "{}")
-    is_synced=$(echo "$sync_status" | jq -r '.isFullySynced // false' 2>/dev/null || echo "false")
-    if [ "$is_synced" = "true" ]; then
-      log "nbxplorer is fully synced"
-      break
-    fi
-    log "nbxplorer not synced yet (attempt $attempt/$max_attempts)"
-    sleep 3
-    ((attempt++))
-  done
-  if [ $attempt -gt $max_attempts ]; then
-    log "WARNING: nbxplorer may not be fully synced, continuing anyway..."
-  fi
-
   # Stop and remove old arkd containers AND volumes to prevent stale state
   docker stop ark ark-wallet 2>/dev/null || true
   docker rm ark ark-wallet 2>/dev/null || true
@@ -408,8 +389,6 @@ else
       docker logs ark-wallet 2>&1 | tail -30
       log "=== arkd logs (last 30 lines) ==="
       docker logs ark 2>&1 | tail -30
-      log "=== nbxplorer sync status ==="
-      curl -sf http://localhost:32838/v1/cryptos/btc/status 2>&1 || echo "nbxplorer unreachable"
       exit 1
     fi
 
@@ -434,10 +413,10 @@ else
       docker logs ark-wallet 2>&1 | tail -50
       log "=== arkd logs (last 50 lines) ==="
       docker logs ark 2>&1 | tail -50
-      log "=== nbxplorer sync status ==="
-      curl -sf http://localhost:32838/v1/cryptos/btc/status 2>&1 || echo "nbxplorer unreachable from host"
       log "=== nbxplorer reachability from ark-wallet ==="
-      docker exec ark-wallet wget -qO- http://nbxplorer:32838/v1/cryptos/btc/status 2>&1 || echo "nbxplorer unreachable from ark-wallet"
+      docker exec ark-wallet wget -qO- http://nbxplorer:32838/v1/cryptos/btc/status 2>&1 || echo "nbxplorer unreachable from ark-wallet (wget may not be available)"
+      log "=== nbxplorer port mapping ==="
+      docker port $(docker ps --format '{{.Names}}' | grep -i nbxplorer | head -1) 2>&1 || echo "nbxplorer container not found"
       exit 1
     fi
 
