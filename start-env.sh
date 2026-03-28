@@ -347,7 +347,7 @@ if [ -n "${ARKD_IMAGE:-}" ]; then
   max_attempts=30
   attempt=1
   while [ $attempt -le $max_attempts ]; do
-    sync_status=$(docker exec nbxplorer curl -sf http://localhost:32838/v1/cryptos/btc/status 2>/dev/null || echo "{}")
+    sync_status=$(docker ps --format '{{.Names}}' | grep -i nbxplorer | head -1 | xargs -I{} docker exec {} curl -sf http://localhost:32838/v1/cryptos/btc/status 2>/dev/null || echo "{}")
     is_synced=$(echo "$sync_status" | jq -r '.isFullySynced // false' 2>/dev/null || echo "false")
     if [ "$is_synced" = "true" ]; then
       log "nbxplorer is fully synced"
@@ -408,7 +408,7 @@ else
       log "=== arkd logs (last 30 lines) ==="
       docker logs ark 2>&1 | tail -30
       log "=== nbxplorer sync status ==="
-      docker exec nbxplorer curl -sf http://localhost:32838/v1/cryptos/btc/status 2>&1 || echo "nbxplorer unreachable"
+      docker ps --format '{{.Names}}' | grep -i nbxplorer | head -1 | xargs -I{} docker exec {} curl -sf http://localhost:32838/v1/cryptos/btc/status 2>&1 || echo "nbxplorer unreachable"
       exit 1
     fi
 
@@ -432,7 +432,7 @@ else
       log "=== arkd logs (last 50 lines) ==="
       docker logs ark 2>&1 | tail -50
       log "=== nbxplorer sync status ==="
-      docker exec nbxplorer curl -sf http://localhost:32838/v1/cryptos/btc/status 2>&1 || echo "nbxplorer unreachable"
+      docker ps --format '{{.Names}}' | grep -i nbxplorer | head -1 | xargs -I{} docker exec {} curl -sf http://localhost:32838/v1/cryptos/btc/status 2>&1 || echo "nbxplorer unreachable"
       exit 1
     fi
 
