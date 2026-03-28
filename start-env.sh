@@ -367,7 +367,7 @@ if [ -n "$arkd_ready" ]; then
   log "arkd wallet already initialized, skipping..."
 else
   if [ -n "${ARKD_IMAGE:-}" ]; then
-    # Custom arkd with UNLOCKER_TYPE=env auto-creates wallet
+    # Custom arkd — create wallet via admin API, then init CLI
     # Step 1: wait for admin HTTP endpoint
     log "Waiting for custom arkd admin endpoint..."
     max_attempts=30
@@ -392,9 +392,66 @@ else
       exit 1
     fi
 
-    # Step 2: init ark CLI (retry until gRPC is ready — wallet sync may take time)
-    log "Initializing ark CLI..."
+    # Step 2: create and unlock wallet via admin API
+    wallet_status=$(curl -s http://localhost:7071/v1/admin/wallet/status 2>/dev/null || echo "{}")
+    wallet_initialized=$(echo "$wallet_status" | jq -r '.initialized // false' 2>/dev/null || echo "false")
+
+    if [ "$wallet_initialized" != "true" ]; then
+      log "Creating arkd wallet via admin API..."
+      seed=$(curl -s -X POST http://localhost:7071/v1/admin/wallet/seed \
+        -H "Content-Type: application/json" -d '{}' 2>/dev/null | jq -r '.seed // empty' 2>/dev/null || echo "")
+      if [ -z "$seed" ]; then
+        log "ERROR: Failed to generate wallet seed"
+        docker logs ark 2>&1 | tail -20
+        exit 1
+      fi
+      create_resp=$(curl -s -X POST http://localhost:7071/v1/admin/wallet/create \
+        -H "Content-Type: application/json" \
+        -d "{\"seed\": \"$seed\", \"password\": \"$ARKD_PASSWORD\"}" 2>/dev/null)
+      log "Wallet created: $create_resp"
+    else
+      log "Wallet already initialized"
+    fi
+
+    wallet_status=$(curl -s http://localhost:7071/v1/admin/wallet/status 2>/dev/null || echo "{}")
+    wallet_unlocked=$(echo "$wallet_status" | jq -r '.unlocked // false' 2>/dev/null || echo "false")
+
+    if [ "$wallet_unlocked" != "true" ]; then
+      log "Unlocking arkd wallet..."
+      curl -s -X POST http://localhost:7071/v1/admin/wallet/unlock \
+        -H "Content-Type: application/json" \
+        -d "{\"password\": \"$ARKD_PASSWORD\"}" >/dev/null 2>&1
+    fi
+
+    # Step 2b: wait for wallet to sync
+    log "Waiting for wallet to sync..."
     max_attempts=60
+    attempt=1
+    while [ $attempt -le $max_attempts ]; do
+      wallet_status=$(curl -s http://localhost:7071/v1/admin/wallet/status 2>/dev/null || echo "{}")
+      wallet_synced=$(echo "$wallet_status" | jq -r '.synced // false' 2>/dev/null || echo "false")
+      if [ "$wallet_synced" = "true" ]; then
+        log "Wallet synced"
+        break
+      fi
+      log "Wallet syncing... (attempt $attempt/$max_attempts)"
+      sleep 3
+      ((attempt++))
+    done
+    if [ $attempt -gt $max_attempts ]; then
+      log "ERROR: Wallet failed to sync — dumping diagnostics"
+      log "=== wallet status ==="
+      curl -s http://localhost:7071/v1/admin/wallet/status 2>&1
+      log "=== ark-wallet logs (last 30 lines) ==="
+      docker logs ark-wallet 2>&1 | tail -30
+      log "=== arkd logs (last 30 lines) ==="
+      docker logs ark 2>&1 | tail -30
+      exit 1
+    fi
+
+    # Step 3: init ark CLI (gRPC should be ready now that wallet is synced)
+    log "Initializing ark CLI..."
+    max_attempts=30
     attempt=1
     while [ $attempt -le $max_attempts ]; do
       if $NIGIRI ark init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>/dev/null; then
@@ -409,18 +466,12 @@ else
       log "ERROR: ark CLI failed to initialize — dumping diagnostics"
       log "=== container status ==="
       docker ps -a --filter name=ark --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>&1
-      log "=== ark-wallet logs (last 50 lines) ==="
-      docker logs ark-wallet 2>&1 | tail -50
       log "=== arkd logs (last 50 lines) ==="
       docker logs ark 2>&1 | tail -50
-      log "=== nbxplorer reachability from ark-wallet ==="
-      docker exec ark-wallet wget -qO- http://nbxplorer:32838/v1/cryptos/btc/status 2>&1 || echo "nbxplorer unreachable from ark-wallet (wget may not be available)"
-      log "=== nbxplorer port mapping ==="
-      docker port $(docker ps --format '{{.Names}}' | grep -i nbxplorer | head -1) 2>&1 || echo "nbxplorer container not found"
       exit 1
     fi
 
-    # Step 3: fund wallet
+    # Step 4: fund wallet
     $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
     $NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD"
   else
