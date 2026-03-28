@@ -341,21 +341,20 @@ else
   sleep 3
   log "Bitcoin Core restarted with minrelaytxfee=0 and mintxfee=0"
 
-  # Wait for chain indexing to stabilize after bitcoin restart
-  log "Waiting for chain indexing to stabilize..."
-  max_attempts=30
+  # Wait for Bitcoin RPC to stabilize after restart
+  log "Waiting for Bitcoin Core to be ready after restart..."
+  max_attempts=15
   attempt=1
   while [ $attempt -le $max_attempts ]; do
-    if curl -sf http://localhost:3000/api/blocks/tip/height >/dev/null 2>&1; then
-      log "Chain indexing is ready (chopsticks responding)"
+    if docker exec bitcoin bitcoin-cli -regtest getblockchaininfo >/dev/null 2>&1; then
+      log "Bitcoin Core is ready"
       break
     fi
-    log "Chain indexing not ready yet... (attempt $attempt/$max_attempts)"
     sleep 2
     ((attempt++))
   done
   if [ $attempt -gt $max_attempts ]; then
-    log "WARNING: Chain indexing did not stabilize, continuing anyway..."
+    log "WARNING: Bitcoin Core not responding after restart, continuing..."
   fi
 fi
 
