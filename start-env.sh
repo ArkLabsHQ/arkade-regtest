@@ -546,6 +546,11 @@ if [ "$NIGIRI_FRESH" = true ]; then
   if [ $attempt -gt $max_attempts ]; then
     log "WARNING: Bitcoin Core not responding after restart, continuing..."
   fi
+
+  # Restart chopsticks to reconnect to bitcoin after its restart
+  log "Restarting chopsticks block miner..."
+  docker restart chopsticks
+  sleep 3
 fi
 
 # ── Setup services (idempotent) ─────────────────────────────────────────────
