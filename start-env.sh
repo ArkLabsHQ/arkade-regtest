@@ -351,8 +351,8 @@ else
   $NIGIRI start --ark --ln || log "Nigiri may already be running, continuing..."
 fi
 
-# ── Bitcoin Core low-fee config (before custom arkd to avoid mid-flight disruption) ──
-if [ "$NIGIRI_FRESH" = true ]; then
+# ── Bitcoin Core low-fee config (optional — restarts bitcoin, chopsticks, nbxplorer) ──
+if [ "$NIGIRI_FRESH" = true ] && [ "${BITCOIN_LOW_FEE:-true}" = true ]; then
   log "Configuring Bitcoin Core to accept low-fee transactions..."
   docker exec bitcoin sh -c 'printf "\nminrelaytxfee=0.0\nmintxfee=0.0\n" >> /data/.bitcoin/bitcoin.conf'
   docker restart bitcoin
@@ -373,10 +373,26 @@ if [ "$NIGIRI_FRESH" = true ]; then
     log "WARNING: Bitcoin Core not responding after restart, continuing..."
   fi
 
-  # Restart chopsticks to reconnect to bitcoin after its restart
-  log "Restarting chopsticks block miner..."
-  docker restart chopsticks
-  sleep 3
+  # Restart chopsticks and nbxplorer to reconnect after Bitcoin Core restart
+  log "Restarting chopsticks block miner and nbxplorer..."
+  docker restart chopsticks nbxplorer
+  sleep 5
+  log "Waiting for nbxplorer to sync after restart..."
+  max_attempts=20
+  attempt=1
+  while [ $attempt -le $max_attempts ]; do
+    if docker exec nbxplorer curl -s http://localhost:32838/v1/cryptos/btc/status 2>/dev/null | grep -q '"isFullySynced":true'; then
+      log "nbxplorer is fully synced"
+      break
+    fi
+    sleep 3
+    ((attempt++))
+  done
+  if [ $attempt -gt $max_attempts ]; then
+    log "WARNING: nbxplorer not synced after restart, continuing..."
+  fi
+elif [ "$NIGIRI_FRESH" = true ]; then
+  log "Skipping Bitcoin Core low-fee config (BITCOIN_LOW_FEE=false)"
 fi
 
 # ── Override arkd if custom image specified ──────────────────────────────────
