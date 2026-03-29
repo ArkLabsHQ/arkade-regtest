@@ -171,7 +171,7 @@ setup_fulmine_wallet() {
   max_attempts=15
   attempt=1
   while [ $attempt -le $max_attempts ]; do
-    if curl -s http://localhost:${FULMINE_API_PORT}/api/v1/wallet/status >/dev/null 2>&1; then
+    if curl -s --connect-timeout 5 --max-time 10 http://localhost:${FULMINE_API_PORT}/api/v1/wallet/status >/dev/null 2>&1; then
       log "Fulmine service is ready!"
       break
     fi
@@ -225,13 +225,24 @@ setup_fulmine_wallet() {
 
   log "Funding Fulmine wallet..."
   $NIGIRI faucet "$fulmine_address" "$FULMINE_FAUCET_AMOUNT"
+
+  # Mine blocks to confirm boarding UTXO before settling
+  log "Mining blocks for Fulmine boarding confirmation..."
+  $NIGIRI rpc generatetoaddress 3 "$($NIGIRI rpc getnewaddress)"
   sleep 5
 
   log "Settling Fulmine wallet..."
-  curl -X GET http://localhost:${FULMINE_API_PORT}/api/v1/settle
+  if ! timeout 120 curl -s --max-time 110 -X GET http://localhost:${FULMINE_API_PORT}/api/v1/settle; then
+    log "WARNING: Fulmine settle timed out or failed, continuing..."
+  fi
+
+  # Wait for batch round and mine commitment tx
+  sleep 15
+  $NIGIRI rpc generatetoaddress 3 "$($NIGIRI rpc getnewaddress)"
+  sleep 3
 
   log "Getting transaction history..."
-  curl -X GET http://localhost:${FULMINE_API_PORT}/api/v1/transactions
+  curl -s --max-time 30 -X GET http://localhost:${FULMINE_API_PORT}/api/v1/transactions || true
 
   log "Fulmine wallet setup completed successfully!"
 }
@@ -244,7 +255,7 @@ setup_delegator_wallet() {
   max_attempts=30
   attempt=1
   while [ $attempt -le $max_attempts ]; do
-    if curl -s http://localhost:${DELEGATOR_API_PORT}/api/v1/wallet/status >/dev/null 2>&1; then
+    if curl -s --connect-timeout 5 --max-time 10 http://localhost:${DELEGATOR_API_PORT}/api/v1/wallet/status >/dev/null 2>&1; then
       log "Delegator service is ready!"
       break
     fi
@@ -303,7 +314,9 @@ setup_delegator_wallet() {
   sleep 5
 
   log "Settling delegator wallet..."
-  curl -s -X GET http://localhost:${DELEGATOR_API_PORT}/api/v1/settle
+  if ! timeout 120 curl -s --max-time 110 -X GET http://localhost:${DELEGATOR_API_PORT}/api/v1/settle; then
+    log "WARNING: Delegator settle timed out or failed, continuing..."
+  fi
 
   # Wait for batch round and mine commitment tx
   sleep 15
@@ -537,7 +550,7 @@ fi
 
 # ── Setup services (idempotent) ─────────────────────────────────────────────
 # Fulmine: check if wallet already exists
-fulmine_status=$(curl -s http://localhost:${FULMINE_API_PORT}/api/v1/wallet/status 2>/dev/null || echo "")
+fulmine_status=$(curl -s --connect-timeout 10 --max-time 15 http://localhost:${FULMINE_API_PORT}/api/v1/wallet/status 2>/dev/null || echo "")
 if echo "$fulmine_status" | jq -e '.initialized' 2>/dev/null | grep -q 'true'; then
   log "Fulmine wallet already initialized, skipping..."
 else
@@ -545,7 +558,7 @@ else
 fi
 
 # Delegator: check if wallet already exists
-delegator_status=$(curl -s http://localhost:${DELEGATOR_API_PORT}/api/v1/wallet/status 2>/dev/null || echo "")
+delegator_status=$(curl -s --connect-timeout 10 --max-time 15 http://localhost:${DELEGATOR_API_PORT}/api/v1/wallet/status 2>/dev/null || echo "")
 if echo "$delegator_status" | jq -e '.initialized' 2>/dev/null | grep -q 'true'; then
   log "Delegator wallet already initialized, skipping..."
 else
@@ -588,7 +601,7 @@ log "Verifying Boltz ARK/BTC pairs..."
 max_attempts=30
 attempt=1
 while [ $attempt -le $max_attempts ]; do
-  pairs=$(curl -s http://localhost:${NGINX_PORT}/v2/swap/submarine 2>/dev/null || echo "{}")
+  pairs=$(curl -s --connect-timeout 5 --max-time 15 http://localhost:${NGINX_PORT}/v2/swap/submarine 2>/dev/null || echo "{}")
   if echo "$pairs" | grep -q '"ARK"'; then
     log "Boltz ARK/BTC pairs loaded successfully"
     break
