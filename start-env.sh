@@ -528,15 +528,18 @@ else
       exit 1
     fi
 
-    # Step 4: fund wallet
-    $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
-    note=$(timeout 60 $NIGIRI arkd note --amount 100000000 --password "$ARKD_PASSWORD" 2>/dev/null || echo "")
-    if [ -n "$note" ]; then
-      if ! timeout 60 $NIGIRI ark redeem-notes -n "$note" --password "$ARKD_PASSWORD" 2>/dev/null; then
-        log "WARNING: redeem-notes failed, continuing with on-chain funds only"
-      fi
+    # Step 4: fund SERVER wallet (not client boarding address)
+    server_addr=$(curl -s http://localhost:7071/v1/admin/wallet/address | jq -r '.address // empty' 2>/dev/null)
+    if [ -n "$server_addr" ]; then
+      log "Funding arkd server wallet at $server_addr..."
+      $NIGIRI faucet "$server_addr" "$ARKD_FAUCET_AMOUNT"
+      sleep 2
+      # Verify balance
+      balance=$(curl -s http://localhost:7071/v1/admin/wallet/balance 2>/dev/null || echo "{}")
+      log "Server wallet balance: $balance"
     else
-      log "WARNING: arkd note generation timed out, continuing with on-chain funds only"
+      log "WARNING: Could not get server wallet address, falling back to client funding"
+      $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
     fi
   else
     # Nigiri's built-in arkd — use nigiri CLI for wallet init
@@ -557,14 +560,17 @@ else
       exit 1
     fi
 
-    $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
-    note=$(timeout 60 $NIGIRI arkd note --amount 100000000 --password "$ARKD_PASSWORD" 2>/dev/null || echo "")
-    if [ -n "$note" ]; then
-      if ! timeout 60 $NIGIRI ark redeem-notes -n "$note" --password "$ARKD_PASSWORD" 2>/dev/null; then
-        log "WARNING: redeem-notes failed, continuing with on-chain funds only"
-      fi
+    # Fund SERVER wallet (not client boarding address)
+    server_addr=$(curl -s http://localhost:7071/v1/admin/wallet/address | jq -r '.address // empty' 2>/dev/null)
+    if [ -n "$server_addr" ]; then
+      log "Funding arkd server wallet at $server_addr..."
+      $NIGIRI faucet "$server_addr" "$ARKD_FAUCET_AMOUNT"
+      sleep 2
+      balance=$(curl -s http://localhost:7071/v1/admin/wallet/balance 2>/dev/null || echo "{}")
+      log "Server wallet balance: $balance"
     else
-      log "WARNING: arkd note generation timed out, continuing with on-chain funds only"
+      log "WARNING: Could not get server wallet address, falling back to client funding"
+      $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
     fi
   fi
 fi
