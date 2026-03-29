@@ -473,7 +473,9 @@ else
 
     # Step 4: fund wallet
     $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
-    $NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD"
+    if ! $NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD" 2>/dev/null; then
+      log "WARNING: redeem-notes failed (may not be supported on this arkd version), continuing with on-chain funds only"
+    fi
   else
     # Nigiri's built-in arkd — use nigiri CLI for wallet init
     log "Waiting for arkd to be ready..."
@@ -494,7 +496,9 @@ else
     fi
 
     $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
-    $NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD"
+    if ! $NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD" 2>/dev/null; then
+      log "WARNING: redeem-notes failed, continuing with on-chain funds only"
+    fi
   fi
 fi
 
