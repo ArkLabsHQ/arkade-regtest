@@ -351,6 +351,34 @@ else
   $NIGIRI start --ark --ln || log "Nigiri may already be running, continuing..."
 fi
 
+# ── Bitcoin Core low-fee config (before custom arkd to avoid mid-flight disruption) ──
+if [ "$NIGIRI_FRESH" = true ]; then
+  log "Configuring Bitcoin Core to accept low-fee transactions..."
+  docker exec bitcoin sh -c 'printf "\nminrelaytxfee=0.0\nmintxfee=0.0\n" >> /data/.bitcoin/bitcoin.conf'
+  docker restart bitcoin
+  sleep 3
+  log "Bitcoin Core restarted with minrelaytxfee=0 and mintxfee=0"
+  log "Waiting for Bitcoin Core to be ready after restart..."
+  max_attempts=15
+  attempt=1
+  while [ $attempt -le $max_attempts ]; do
+    if docker exec bitcoin bitcoin-cli -regtest getblockchaininfo >/dev/null 2>&1; then
+      log "Bitcoin Core is ready"
+      break
+    fi
+    sleep 2
+    ((attempt++))
+  done
+  if [ $attempt -gt $max_attempts ]; then
+    log "WARNING: Bitcoin Core not responding after restart, continuing..."
+  fi
+
+  # Restart chopsticks to reconnect to bitcoin after its restart
+  log "Restarting chopsticks block miner..."
+  docker restart chopsticks
+  sleep 3
+fi
+
 # ── Override arkd if custom image specified ──────────────────────────────────
 if [ -n "${ARKD_IMAGE:-}" ]; then
   log "Custom ARKD_IMAGE set: $ARKD_IMAGE"
@@ -525,49 +553,6 @@ else
   fi
 fi
 
-# ── Bitcoin Core low-fee config (after arkd init to avoid disrupting nbxplorer) ──
-if [ "$NIGIRI_FRESH" = true ]; then
-  log "Configuring Bitcoin Core to accept low-fee transactions..."
-  docker exec bitcoin sh -c 'printf "\nminrelaytxfee=0.0\nmintxfee=0.0\n" >> /data/.bitcoin/bitcoin.conf'
-  docker restart bitcoin
-  sleep 3
-  log "Bitcoin Core restarted with minrelaytxfee=0 and mintxfee=0"
-  log "Waiting for Bitcoin Core to be ready after restart..."
-  max_attempts=15
-  attempt=1
-  while [ $attempt -le $max_attempts ]; do
-    if docker exec bitcoin bitcoin-cli -regtest getblockchaininfo >/dev/null 2>&1; then
-      log "Bitcoin Core is ready"
-      break
-    fi
-    sleep 2
-    ((attempt++))
-  done
-  if [ $attempt -gt $max_attempts ]; then
-    log "WARNING: Bitcoin Core not responding after restart, continuing..."
-  fi
-
-  # Restart chopsticks to reconnect to bitcoin after its restart
-  log "Restarting chopsticks block miner..."
-  docker restart chopsticks
-  sleep 3
-
-  # Restart arkd so it re-establishes its chain monitoring connection
-  # (arkd's block scheduler watches chopsticks/esplora for new blocks)
-  if [ -n "$ARKD_IMAGE" ]; then
-    log "Restarting arkd to reconnect to chopsticks..."
-    docker restart ark
-    sleep 5
-    # Wait for arkd admin endpoint to come back
-    for i in $(seq 1 30); do
-      if curl -s --connect-timeout 2 --max-time 5 http://localhost:7071/v1/admin/wallet/status 2>/dev/null | grep -q "unlocked"; then
-        log "arkd is ready after restart"
-        break
-      fi
-      sleep 2
-    done
-  fi
-fi
 
 # ── Setup services (idempotent) ─────────────────────────────────────────────
 # Fulmine: check if wallet already exists
