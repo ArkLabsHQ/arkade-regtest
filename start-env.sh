@@ -528,13 +528,15 @@ else
       exit 1
     fi
 
-    # Step 4: fund SERVER wallet (not client boarding address)
+    # Step 4: fund SERVER wallet and generate blocks for fee estimation
     server_addr=$(curl -s http://localhost:7071/v1/admin/wallet/address | jq -r '.address // empty' 2>/dev/null)
     if [ -n "$server_addr" ]; then
-      log "Funding arkd server wallet at $server_addr..."
-      $NIGIRI faucet "$server_addr" "$ARKD_FAUCET_AMOUNT"
+      log "Funding arkd server wallet at $server_addr (21 txs for fee estimation)..."
+      for i in $(seq 1 21); do
+        $NIGIRI faucet "$server_addr" 0.1 >/dev/null 2>&1
+      done
+      log "Server wallet funded with 2.1 BTC across 21 blocks"
       sleep 2
-      # Verify balance
       balance=$(curl -s http://localhost:7071/v1/admin/wallet/balance 2>/dev/null || echo "{}")
       log "Server wallet balance: $balance"
     else
@@ -560,11 +562,14 @@ else
       exit 1
     fi
 
-    # Fund SERVER wallet (not client boarding address)
+    # Fund SERVER wallet and generate blocks for fee estimation
     server_addr=$(curl -s http://localhost:7071/v1/admin/wallet/address | jq -r '.address // empty' 2>/dev/null)
     if [ -n "$server_addr" ]; then
-      log "Funding arkd server wallet at $server_addr..."
-      $NIGIRI faucet "$server_addr" "$ARKD_FAUCET_AMOUNT"
+      log "Funding arkd server wallet at $server_addr (21 txs for fee estimation)..."
+      for i in $(seq 1 21); do
+        $NIGIRI faucet "$server_addr" 0.1 >/dev/null 2>&1
+      done
+      log "Server wallet funded with 2.1 BTC across 21 blocks"
       sleep 2
       balance=$(curl -s http://localhost:7071/v1/admin/wallet/balance 2>/dev/null || echo "{}")
       log "Server wallet balance: $balance"
