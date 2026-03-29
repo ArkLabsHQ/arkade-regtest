@@ -398,10 +398,10 @@ else
 
     if [ "$wallet_initialized" != "true" ]; then
       log "Creating arkd wallet via admin API..."
-      seed=$(curl -s -X POST http://localhost:7071/v1/admin/wallet/seed \
-        -H "Content-Type: application/json" -d '{}' 2>/dev/null | jq -r '.seed // empty' 2>/dev/null || echo "")
+      seed_resp=$(curl -s http://localhost:7071/v1/admin/wallet/seed 2>/dev/null)
+      seed=$(echo "$seed_resp" | jq -r '.seed // empty' 2>/dev/null || echo "")
       if [ -z "$seed" ]; then
-        log "ERROR: Failed to generate wallet seed"
+        log "ERROR: Failed to generate wallet seed (response: $seed_resp)"
         docker logs ark 2>&1 | tail -20
         exit 1
       fi
