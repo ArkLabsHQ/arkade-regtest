@@ -551,6 +551,22 @@ if [ "$NIGIRI_FRESH" = true ]; then
   log "Restarting chopsticks block miner..."
   docker restart chopsticks
   sleep 3
+
+  # Restart arkd so it re-establishes its chain monitoring connection
+  # (arkd's block scheduler watches chopsticks/esplora for new blocks)
+  if [ -n "$ARKD_IMAGE" ]; then
+    log "Restarting arkd to reconnect to chopsticks..."
+    docker restart ark
+    sleep 5
+    # Wait for arkd admin endpoint to come back
+    for i in $(seq 1 30); do
+      if curl -s --connect-timeout 2 --max-time 5 http://localhost:7071/v1/admin/wallet/status 2>/dev/null | grep -q "unlocked"; then
+        log "arkd is ready after restart"
+        break
+      fi
+      sleep 2
+    done
+  fi
 fi
 
 # ── Setup services (idempotent) ─────────────────────────────────────────────
