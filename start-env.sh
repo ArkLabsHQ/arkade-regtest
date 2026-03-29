@@ -630,6 +630,21 @@ log "Restarting Boltz to reconnect to boltz-lnd..."
 docker restart boltz
 sleep 5
 
+# Fund Boltz Bitcoin Core wallet for on-chain swaps (reverse swaps, chain swaps)
+log "Funding Boltz Bitcoin Core wallet..."
+boltz_wallet=$(docker exec bitcoin bitcoin-cli -regtest listwallets 2>/dev/null | jq -r '.[] | select(. != "" and . != "legacy" and . != "\"\"")' | head -1)
+if [ -n "$boltz_wallet" ]; then
+  boltz_addr=$(docker exec bitcoin bitcoin-cli -regtest -rpcwallet="$boltz_wallet" getnewaddress 2>/dev/null)
+  if [ -n "$boltz_addr" ]; then
+    $NIGIRI faucet "$boltz_addr" 5
+    log "Boltz wallet '$boltz_wallet' funded at $boltz_addr"
+  else
+    log "WARNING: Could not get address for Boltz wallet '$boltz_wallet'"
+  fi
+else
+  log "WARNING: No Boltz wallet found in Bitcoin Core"
+fi
+
 log "Verifying Boltz ARK/BTC pairs..."
 max_attempts=30
 attempt=1
