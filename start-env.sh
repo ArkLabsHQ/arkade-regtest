@@ -533,9 +533,9 @@ else
     if [ -n "$server_addr" ]; then
       log "Funding arkd server wallet at $server_addr (21 txs for fee estimation)..."
       for i in $(seq 1 21); do
-        $NIGIRI faucet "$server_addr" 0.1 >/dev/null 2>&1
+        $NIGIRI faucet "$server_addr" 1 >/dev/null 2>&1
       done
-      log "Server wallet funded with 2.1 BTC across 21 blocks"
+      log "Server wallet funded with 21 BTC across 21 blocks"
       sleep 2
       balance=$(curl -s http://localhost:7071/v1/admin/wallet/balance 2>/dev/null || echo "{}")
       log "Server wallet balance: $balance"
@@ -567,9 +567,9 @@ else
     if [ -n "$server_addr" ]; then
       log "Funding arkd server wallet at $server_addr (21 txs for fee estimation)..."
       for i in $(seq 1 21); do
-        $NIGIRI faucet "$server_addr" 0.1 >/dev/null 2>&1
+        $NIGIRI faucet "$server_addr" 1 >/dev/null 2>&1
       done
-      log "Server wallet funded with 2.1 BTC across 21 blocks"
+      log "Server wallet funded with 21 BTC across 21 blocks"
       sleep 2
       balance=$(curl -s http://localhost:7071/v1/admin/wallet/balance 2>/dev/null || echo "{}")
       log "Server wallet balance: $balance"
