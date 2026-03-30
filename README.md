@@ -17,13 +17,24 @@ A self-contained regtest environment for Ark protocol development. It orchestrat
 
 ## Configuration
 
-All defaults live in `.env.defaults`. To override any value, create a `.env` file (git-ignored) and pass it at startup:
+All defaults live in `.env.defaults`. The script auto-discovers overrides in this priority order:
+
+1. `--env <path>` flag (explicit, highest priority)
+2. `../.env.regtest` (parent repo override — typical submodule case)
+3. `.env` (local override in arkade-regtest itself)
+
+Variables in the override file replace their `.env.defaults` counterparts; unspecified variables keep their defaults.
+
+### Custom arkd version
+
+To use a specific arkd version instead of nigiri's built-in one, set `ARKD_IMAGE` and `ARKD_WALLET_IMAGE` in your override file:
 
 ```bash
-./start-env.sh --env .env
+ARKD_IMAGE=ghcr.io/arkade-os/arkd:v0.9.0
+ARKD_WALLET_IMAGE=ghcr.io/arkade-os/arkd-wallet:v0.9.0
 ```
 
-Variables in `.env` take precedence over `.env.defaults`. You only need to specify the values you want to change.
+When set, `start-env.sh` stops nigiri's arkd and starts these images instead.
 
 ## Nigiri resolution
 
@@ -51,28 +62,55 @@ Nigiri's own services (electrs, esplora, chopsticks, arkd) use their standard po
 - **`create-invoice.sh`** -- Creates a Lightning invoice on the Boltz LND node. Useful for testing payment flows through Boltz swaps.
 - **`pay-invoice.sh`** -- Pays a Lightning invoice from the Boltz LND node. Useful for testing receive flows and Boltz reverse swaps.
 
-## Integration as a submodule
+## Using as a git submodule
 
-Add this repo as a git submodule in your project:
-
-```bash
-git submodule add https://github.com/ArkLabsHQ/arkade-regtest.git arkade-regtest
-git submodule update --init --recursive
-```
-
-Then call scripts from your project root:
+Add arkade-regtest to your project:
 
 ```bash
-./arkade-regtest/start-env.sh
-./arkade-regtest/start-env.sh --env .env
-./arkade-regtest/stop-env.sh
-./arkade-regtest/clean-env.sh
+git submodule add https://github.com/arkade-os/arkade-regtest.git regtest
 ```
 
-In CI, make sure your checkout step pulls submodules:
+Create `.env.regtest` in your repo root to override defaults:
+
+```bash
+# Pin specific arkd version
+ARKD_IMAGE=ghcr.io/arkade-os/arkd:v0.9.0
+ARKD_WALLET_IMAGE=ghcr.io/arkade-os/arkd-wallet:v0.9.0
+```
+
+Start the environment:
+
+```bash
+./regtest/start-env.sh
+```
+
+The script auto-discovers `../.env.regtest` from the parent directory.
+
+See `.env.defaults` for all available configuration options.
+
+### CI integration
 
 ```yaml
 - uses: actions/checkout@v4
   with:
     submodules: true
+
+- uses: actions/setup-go@v5
+  with:
+    go-version: '1.23'
+
+- uses: actions/cache@v4
+  with:
+    path: regtest/_build
+    key: nigiri-${{ hashFiles('regtest/.env.defaults', '.env.regtest') }}
+
+- name: Start regtest environment
+  run: ./regtest/start-env.sh
+
+- name: Run tests
+  run: <your test command>
+
+- name: Cleanup
+  if: always()
+  run: ./regtest/clean-env.sh
 ```

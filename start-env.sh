@@ -3,13 +3,17 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# ── Verify script is not running from an empty submodule ─────────────────────
+if [ ! -f "$SCRIPT_DIR/.env.defaults" ]; then
+  echo "ERROR: $SCRIPT_DIR/.env.defaults not found."
+  echo "If this is a git submodule, run: git submodule update --init"
+  exit 1
+fi
+
 # ── Logging ──────────────────────────────────────────────────────────────────
 log() {
   echo -e "\033[0;32m[$(date '+%H:%M:%S')] $1\033[0m"
 }
-
-# ── Load defaults ────────────────────────────────────────────────────────────
-source "$SCRIPT_DIR/.env.defaults"
 
 # ── Parse arguments ──────────────────────────────────────────────────────────
 CLEAN=false
@@ -32,16 +36,22 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# ── Load user overrides ─────────────────────────────────────────────────────
-if [ -n "$USER_ENV" ] && [ -f "$USER_ENV" ]; then
-  log "Loading user env from $USER_ENV"
-  source "$USER_ENV"
-fi
+# ── Load environment ────────────────────────────────────────────────────────
+source "$SCRIPT_DIR/lib/env.sh"
+load_env "$SCRIPT_DIR"
 
 # ── Export vars for docker-compose interpolation ─────────────────────────────
 export BOLTZ_LND_IMAGE FULMINE_IMAGE BOLTZ_IMAGE NGINX_IMAGE
+export ARKD_IMAGE ARKD_WALLET_IMAGE
 export BOLTZ_LND_P2P_PORT BOLTZ_LND_RPC_PORT FULMINE_HTTP_PORT FULMINE_API_PORT
+export DELEGATOR_GRPC_PORT DELEGATOR_API_PORT DELEGATOR_HTTP_PORT
 export BOLTZ_GRPC_PORT BOLTZ_API_PORT BOLTZ_WS_PORT NGINX_PORT
+export ARKD_WALLET_SIGNER_KEY
+export ARKD_SCHEDULER_TYPE ARKD_ALLOW_CSV_BLOCK_TYPE ARKD_VTXO_TREE_EXPIRY
+export ARKD_UNILATERAL_EXIT_DELAY ARKD_BOARDING_EXIT_DELAY ARKD_LIVE_STORE_TYPE
+export ARKD_LOG_LEVEL ARKD_SESSION_DURATION ARKD_ROUND_INTERVAL
+export ARK_OFFCHAIN_INPUT_FEE ARK_ONCHAIN_INPUT_FEE
+export ARK_OFFCHAIN_OUTPUT_FEE ARK_ONCHAIN_OUTPUT_FEE
 
 # ── Nigiri resolution ───────────────────────────────────────────────────────
 build_nigiri_from_source() {
@@ -163,7 +173,7 @@ setup_fulmine_wallet() {
   max_attempts=15
   attempt=1
   while [ $attempt -le $max_attempts ]; do
-    if curl -s http://localhost:${FULMINE_API_PORT}/api/v1/wallet/status >/dev/null 2>&1; then
+    if curl -s --connect-timeout 5 --max-time 10 http://localhost:${FULMINE_API_PORT}/api/v1/wallet/status >/dev/null 2>&1; then
       log "Fulmine service is ready!"
       break
     fi
@@ -217,15 +227,105 @@ setup_fulmine_wallet() {
 
   log "Funding Fulmine wallet..."
   $NIGIRI faucet "$fulmine_address" "$FULMINE_FAUCET_AMOUNT"
+
+  # Mine blocks to confirm boarding UTXO before settling
+  log "Mining blocks for Fulmine boarding confirmation..."
+  $NIGIRI rpc generatetoaddress 3 "$($NIGIRI rpc getnewaddress)"
   sleep 5
 
   log "Settling Fulmine wallet..."
-  curl -X GET http://localhost:${FULMINE_API_PORT}/api/v1/settle
+  if ! timeout 120 curl -s --max-time 110 -X GET http://localhost:${FULMINE_API_PORT}/api/v1/settle; then
+    log "WARNING: Fulmine settle timed out or failed, continuing..."
+  fi
+
+  # Wait for batch round and mine commitment tx
+  sleep 15
+  $NIGIRI rpc generatetoaddress 3 "$($NIGIRI rpc getnewaddress)"
+  sleep 3
 
   log "Getting transaction history..."
-  curl -X GET http://localhost:${FULMINE_API_PORT}/api/v1/transactions
+  curl -s --max-time 30 -X GET http://localhost:${FULMINE_API_PORT}/api/v1/transactions || true
 
   log "Fulmine wallet setup completed successfully!"
+}
+
+# ── Helper: setup_delegator_wallet ───────────────────────────────────────────
+setup_delegator_wallet() {
+  log "Setting up Fulmine delegator wallet..."
+
+  # Wait for delegator service to be ready (fulmine needs arkd to be fully serving)
+  max_attempts=30
+  attempt=1
+  while [ $attempt -le $max_attempts ]; do
+    if curl -s --connect-timeout 5 --max-time 10 http://localhost:${DELEGATOR_API_PORT}/api/v1/wallet/status >/dev/null 2>&1; then
+      log "Delegator service is ready!"
+      break
+    fi
+    log "Waiting for delegator service... (attempt $attempt/$max_attempts)"
+    sleep 2
+    ((attempt++))
+  done
+
+  if [ $attempt -gt $max_attempts ]; then
+    log "ERROR: Delegator service failed to start within expected time"
+    exit 1
+  fi
+
+  # Generate seed and create wallet
+  log "Generating delegator seed..."
+  seed_response=$(curl -s -X GET http://localhost:${DELEGATOR_API_PORT}/api/v1/wallet/genseed)
+  private_key=$(echo "$seed_response" | jq -r '.nsec')
+
+  log "Creating delegator wallet..."
+  curl -s -X POST http://localhost:${DELEGATOR_API_PORT}/api/v1/wallet/create \
+       -H "Content-Type: application/json" \
+       -d "{\"private_key\": \"$private_key\", \"password\": \"password\", \"server_url\": \"http://ark:7070\"}"
+
+  log "Unlocking delegator wallet..."
+  curl -s -X POST http://localhost:${DELEGATOR_API_PORT}/api/v1/wallet/unlock \
+       -H "Content-Type: application/json" \
+       -d '{"password": "password"}'
+
+  # Fund delegator wallet
+  log "Getting delegator address..."
+  max_attempts=5
+  attempt=1
+  local delegator_address=""
+  while [ $attempt -le $max_attempts ]; do
+    local address_response=$(curl -s -X GET http://localhost:${DELEGATOR_API_PORT}/api/v1/address)
+    delegator_address=$(echo "$address_response" | jq -r '.address' | sed 's/bitcoin://' | sed 's/?ark=.*//')
+    if [[ "$delegator_address" != "null" && -n "$delegator_address" ]]; then
+      break
+    fi
+    log "Address not ready yet (attempt $attempt/$max_attempts), waiting..."
+    sleep 2
+    ((attempt++))
+  done
+
+  if [[ "$delegator_address" == "null" || -z "$delegator_address" ]]; then
+    log "ERROR: Failed to get delegator address"
+    exit 1
+  fi
+
+  log "Delegator address: $delegator_address"
+  $NIGIRI faucet "$delegator_address" 0.01
+
+  # Mine blocks to confirm boarding UTXO before settling
+  log "Mining blocks for delegator boarding confirmation..."
+  $NIGIRI rpc generatetoaddress 3 "$($NIGIRI rpc getnewaddress)"
+  sleep 5
+
+  log "Settling delegator wallet..."
+  if ! timeout 120 curl -s --max-time 110 -X GET http://localhost:${DELEGATOR_API_PORT}/api/v1/settle; then
+    log "WARNING: Delegator settle timed out or failed, continuing..."
+  fi
+
+  # Wait for batch round and mine commitment tx
+  sleep 15
+  $NIGIRI rpc generatetoaddress 3 "$($NIGIRI rpc getnewaddress)"
+  sleep 3
+
+  log "Delegator wallet setup completed!"
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -241,50 +341,282 @@ if [ "$CLEAN" = true ]; then
 fi
 
 # ── Pull and start Nigiri ────────────────────────────────────────────────────
-log "Pulling latest Nigiri images..."
-$NIGIRI update || log "Nigiri update failed, continuing with existing images..."
+NIGIRI_FRESH=false
+if docker ps --format '{{.Names}}' | grep -q '^bitcoin$'; then
+  log "Nigiri already running, skipping start..."
+else
+  NIGIRI_FRESH=true
+  log "Pulling latest Nigiri images..."
+  $NIGIRI update || log "Nigiri update failed, continuing with existing images..."
 
-log "Starting Nigiri with Ark and LN support..."
-$NIGIRI start --ark --ln || log "Nigiri may already be running, continuing..."
-
-# ── Bitcoin Core low-fee config ──────────────────────────────────────────────
-log "Configuring Bitcoin Core to accept low-fee transactions..."
-docker exec bitcoin sh -c 'printf "\nminrelaytxfee=0.0\nmintxfee=0.0\n" >> /data/.bitcoin/bitcoin.conf'
-docker restart bitcoin
-sleep 3
-log "Bitcoin Core restarted with minrelaytxfee=0 and mintxfee=0"
-
-# ── Docker compose overlay ──────────────────────────────────────────────────
-log "Pulling latest custom Ark stack images..."
-docker compose -f "$SCRIPT_DIR/docker/docker-compose.ark.yml" pull
-
-log "Starting ark stack..."
-docker compose -f "$SCRIPT_DIR/docker/docker-compose.ark.yml" up -d
-
-# ── Wait for arkd and init wallet ────────────────────────────────────────────
-log "Waiting for arkd to be ready..."
-max_attempts=30
-attempt=1
-while [ $attempt -le $max_attempts ]; do
-  if $NIGIRI ark init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>/dev/null; then
-    log "arkd wallet initialized"
-    break
-  fi
-  log "Waiting for arkd... (attempt $attempt/$max_attempts)"
-  sleep 3
-  ((attempt++))
-done
-if [ $attempt -gt $max_attempts ]; then
-  log "ERROR: arkd failed to start within expected time"
-  exit 1
+  log "Starting Nigiri with Ark and LN support..."
+  $NIGIRI start --ark --ln || log "Nigiri may already be running, continuing..."
 fi
 
-$NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
-$NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD"
+# ── Bitcoin Core low-fee config (optional — restarts bitcoin, chopsticks, nbxplorer) ──
+if [ "$NIGIRI_FRESH" = true ] && [ "${BITCOIN_LOW_FEE:-true}" = true ]; then
+  log "Configuring Bitcoin Core to accept low-fee transactions..."
+  docker exec bitcoin sh -c 'printf "\nminrelaytxfee=0.0\nmintxfee=0.0\n" >> /data/.bitcoin/bitcoin.conf'
+  docker restart bitcoin
+  sleep 3
+  log "Bitcoin Core restarted with minrelaytxfee=0 and mintxfee=0"
+  log "Waiting for Bitcoin Core to be ready after restart..."
+  max_attempts=15
+  attempt=1
+  while [ $attempt -le $max_attempts ]; do
+    if docker exec bitcoin bitcoin-cli -regtest getblockchaininfo >/dev/null 2>&1; then
+      log "Bitcoin Core is ready"
+      break
+    fi
+    sleep 2
+    ((attempt++))
+  done
+  if [ $attempt -gt $max_attempts ]; then
+    log "WARNING: Bitcoin Core not responding after restart, continuing..."
+  fi
 
-# ── Setup services ───────────────────────────────────────────────────────────
-setup_fulmine_wallet
-setup_lnd_wallet
+  # Restart chopsticks to reconnect after Bitcoin Core restart
+  log "Restarting chopsticks block miner..."
+  docker restart chopsticks
+  # Restart nbxplorer only if it exists (not all stacks include it)
+  if docker inspect nbxplorer >/dev/null 2>&1; then
+    log "Restarting nbxplorer..."
+    docker restart nbxplorer
+    sleep 5
+    log "Waiting for nbxplorer to sync after restart..."
+    max_attempts=20
+    attempt=1
+    while [ $attempt -le $max_attempts ]; do
+      if docker exec nbxplorer curl -s http://localhost:32838/v1/cryptos/btc/status 2>/dev/null | grep -q '"isFullySynced":true'; then
+        log "nbxplorer is fully synced"
+        break
+      fi
+      sleep 3
+      ((attempt++))
+    done
+    if [ $attempt -gt $max_attempts ]; then
+      log "WARNING: nbxplorer not synced after restart, continuing..."
+    fi
+  fi
+elif [ "$NIGIRI_FRESH" = true ]; then
+  log "Skipping Bitcoin Core low-fee config (BITCOIN_LOW_FEE=false)"
+fi
+
+# ── Override arkd if custom image specified ──────────────────────────────────
+if [ -n "${ARKD_IMAGE:-}" ]; then
+  log "Custom ARKD_IMAGE set: $ARKD_IMAGE"
+
+  # Stop and remove old arkd containers AND volumes to prevent stale state
+  docker stop ark ark-wallet 2>/dev/null || true
+  docker rm ark ark-wallet 2>/dev/null || true
+  docker volume rm nigiri_ark_datadir nigiri_ark_wallet_datadir 2>/dev/null || true
+  docker compose -f "$SCRIPT_DIR/docker/docker-compose.arkd-override.yml" pull
+  docker compose -f "$SCRIPT_DIR/docker/docker-compose.arkd-override.yml" up -d
+  sleep 5
+fi
+
+# ── Docker compose overlay ──────────────────────────────────────────────────
+if docker ps --format '{{.Names}}' | grep -q '^boltz$'; then
+  log "Ark stack already running, skipping..."
+else
+  log "Pulling latest custom Ark stack images..."
+  docker compose -f "$SCRIPT_DIR/docker/docker-compose.ark.yml" pull
+  log "Starting ark stack..."
+  docker compose -f "$SCRIPT_DIR/docker/docker-compose.ark.yml" up -d
+fi
+
+# ── Wait for arkd and init wallet ────────────────────────────────────────────
+arkd_ready=$(curl -s http://localhost:7070/v1/info 2>/dev/null | jq -r '.pubkey // empty' 2>/dev/null || echo "")
+if [ -n "$arkd_ready" ]; then
+  log "arkd wallet already initialized, skipping..."
+else
+  if [ -n "${ARKD_IMAGE:-}" ]; then
+    # Custom arkd — create wallet via admin API, then init CLI
+    # Step 1: wait for admin HTTP endpoint
+    log "Waiting for custom arkd admin endpoint..."
+    max_attempts=30
+    attempt=1
+    while [ $attempt -le $max_attempts ]; do
+      if curl -sf http://localhost:7071/v1/admin/intentFees >/dev/null 2>&1; then
+        log "arkd admin endpoint is up"
+        break
+      fi
+      log "Waiting for arkd... (attempt $attempt/$max_attempts)"
+      sleep 3
+      ((attempt++))
+    done
+    if [ $attempt -gt $max_attempts ]; then
+      log "ERROR: arkd admin endpoint failed to respond — dumping diagnostics"
+      log "=== ark container status ==="
+      docker ps -a --filter name=ark --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>&1
+      log "=== ark-wallet logs (last 30 lines) ==="
+      docker logs ark-wallet 2>&1 | tail -30
+      log "=== arkd logs (last 30 lines) ==="
+      docker logs ark 2>&1 | tail -30
+      exit 1
+    fi
+
+    # Step 2: create and unlock wallet via admin API
+    wallet_status=$(curl -s http://localhost:7071/v1/admin/wallet/status 2>/dev/null || echo "{}")
+    wallet_initialized=$(echo "$wallet_status" | jq -r '.initialized // false' 2>/dev/null || echo "false")
+
+    if [ "$wallet_initialized" != "true" ]; then
+      log "Creating arkd wallet via admin API..."
+      seed_resp=$(curl -s http://localhost:7071/v1/admin/wallet/seed 2>/dev/null)
+      seed=$(echo "$seed_resp" | jq -r '.seed // empty' 2>/dev/null || echo "")
+      if [ -z "$seed" ]; then
+        log "ERROR: Failed to generate wallet seed (response: $seed_resp)"
+        docker logs ark 2>&1 | tail -20
+        exit 1
+      fi
+      create_resp=$(curl -s -X POST http://localhost:7071/v1/admin/wallet/create \
+        -H "Content-Type: application/json" \
+        -d "{\"seed\": \"$seed\", \"password\": \"$ARKD_PASSWORD\"}" 2>/dev/null)
+      log "Wallet created: $create_resp"
+    else
+      log "Wallet already initialized"
+    fi
+
+    wallet_status=$(curl -s http://localhost:7071/v1/admin/wallet/status 2>/dev/null || echo "{}")
+    wallet_unlocked=$(echo "$wallet_status" | jq -r '.unlocked // false' 2>/dev/null || echo "false")
+
+    if [ "$wallet_unlocked" != "true" ]; then
+      log "Unlocking arkd wallet..."
+      curl -s -X POST http://localhost:7071/v1/admin/wallet/unlock \
+        -H "Content-Type: application/json" \
+        -d "{\"password\": \"$ARKD_PASSWORD\"}" >/dev/null 2>&1
+    fi
+
+    # Step 2b: wait for wallet to sync
+    log "Waiting for wallet to sync..."
+    max_attempts=60
+    attempt=1
+    while [ $attempt -le $max_attempts ]; do
+      wallet_status=$(curl -s http://localhost:7071/v1/admin/wallet/status 2>/dev/null || echo "{}")
+      wallet_synced=$(echo "$wallet_status" | jq -r '.synced // false' 2>/dev/null || echo "false")
+      if [ "$wallet_synced" = "true" ]; then
+        log "Wallet synced"
+        break
+      fi
+      log "Wallet syncing... (attempt $attempt/$max_attempts)"
+      sleep 3
+      ((attempt++))
+    done
+    if [ $attempt -gt $max_attempts ]; then
+      log "ERROR: Wallet failed to sync — dumping diagnostics"
+      log "=== wallet status ==="
+      curl -s http://localhost:7071/v1/admin/wallet/status 2>&1
+      log "=== ark-wallet logs (last 30 lines) ==="
+      docker logs ark-wallet 2>&1 | tail -30
+      log "=== arkd logs (last 30 lines) ==="
+      docker logs ark 2>&1 | tail -30
+      exit 1
+    fi
+
+    # Step 3: init ark CLI (gRPC should be ready now that wallet is synced)
+    log "Initializing ark CLI..."
+    max_attempts=30
+    attempt=1
+    while [ $attempt -le $max_attempts ]; do
+      if $NIGIRI ark init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>/dev/null; then
+        log "ark CLI initialized"
+        break
+      fi
+      log "ark CLI init retry... (attempt $attempt/$max_attempts)"
+      sleep 3
+      ((attempt++))
+    done
+    if [ $attempt -gt $max_attempts ]; then
+      log "ERROR: ark CLI failed to initialize — dumping diagnostics"
+      log "=== container status ==="
+      docker ps -a --filter name=ark --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>&1
+      log "=== arkd logs (last 50 lines) ==="
+      docker logs ark 2>&1 | tail -50
+      exit 1
+    fi
+
+    # Step 4: fund SERVER wallet and generate blocks for fee estimation
+    server_addr=$(curl -s http://localhost:7071/v1/admin/wallet/address | jq -r '.address // empty' 2>/dev/null)
+    if [ -n "$server_addr" ]; then
+      log "Funding arkd server wallet at $server_addr (21 txs for fee estimation)..."
+      for i in $(seq 1 21); do
+        $NIGIRI faucet "$server_addr" 1 >/dev/null 2>&1
+      done
+      log "Server wallet funded with 21 BTC across 21 blocks"
+      sleep 2
+      balance=$(curl -s http://localhost:7071/v1/admin/wallet/balance 2>/dev/null || echo "{}")
+      log "Server wallet balance: $balance"
+    else
+      log "WARNING: Could not get server wallet address, falling back to client funding"
+      $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
+      # Convert onchain funds to offchain via redeem-notes
+      $NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD" 2>/dev/null || log "WARNING: redeem-notes failed (older arkd version?)"
+    fi
+  else
+    # Nigiri's built-in arkd — use nigiri CLI for wallet init
+    log "Waiting for arkd to be ready..."
+    max_attempts=30
+    attempt=1
+    while [ $attempt -le $max_attempts ]; do
+      if $NIGIRI ark init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>/dev/null; then
+        log "arkd wallet initialized"
+        break
+      fi
+      log "Waiting for arkd... (attempt $attempt/$max_attempts)"
+      sleep 3
+      ((attempt++))
+    done
+    if [ $attempt -gt $max_attempts ]; then
+      log "ERROR: arkd failed to start within expected time"
+      exit 1
+    fi
+
+    # Fund SERVER wallet and generate blocks for fee estimation
+    server_addr=$(curl -s http://localhost:7071/v1/admin/wallet/address | jq -r '.address // empty' 2>/dev/null)
+    if [ -n "$server_addr" ]; then
+      log "Funding arkd server wallet at $server_addr (21 txs for fee estimation)..."
+      for i in $(seq 1 21); do
+        $NIGIRI faucet "$server_addr" 1 >/dev/null 2>&1
+      done
+      log "Server wallet funded with 21 BTC across 21 blocks"
+      sleep 2
+      balance=$(curl -s http://localhost:7071/v1/admin/wallet/balance 2>/dev/null || echo "{}")
+      log "Server wallet balance: $balance"
+    else
+      log "WARNING: Could not get server wallet address, falling back to client funding"
+      $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
+      # Convert onchain funds to offchain via redeem-notes
+      $NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD" 2>/dev/null || log "WARNING: redeem-notes failed (older arkd version?)"
+    fi
+  fi
+fi
+
+
+# ── Setup services (idempotent) ─────────────────────────────────────────────
+# Fulmine: check if wallet already exists
+fulmine_status=$(curl -s --connect-timeout 10 --max-time 15 http://localhost:${FULMINE_API_PORT}/api/v1/wallet/status 2>/dev/null || echo "")
+if echo "$fulmine_status" | jq -e '.initialized' 2>/dev/null | grep -q 'true'; then
+  log "Fulmine wallet already initialized, skipping..."
+else
+  setup_fulmine_wallet
+fi
+
+# Delegator: check if wallet already exists
+delegator_status=$(curl -s --connect-timeout 10 --max-time 15 http://localhost:${DELEGATOR_API_PORT}/api/v1/wallet/status 2>/dev/null || echo "")
+if echo "$delegator_status" | jq -e '.initialized' 2>/dev/null | grep -q 'true'; then
+  log "Delegator wallet already initialized, skipping..."
+else
+  setup_delegator_wallet
+fi
+
+# LND: check if channel already exists
+channel_count=$(docker exec boltz-lnd lncli --network=regtest listchannels 2>/dev/null | jq '.channels | length' 2>/dev/null || echo "0")
+if [ "$channel_count" -gt 0 ]; then
+  log "LND channel already open, skipping setup..."
+else
+  setup_lnd_wallet
+fi
+
 setup_arkd_fees
 
 # ── Wait for boltz-lnd, restart boltz, verify pairs ─────────────────────────
@@ -309,11 +641,26 @@ log "Restarting Boltz to reconnect to boltz-lnd..."
 docker restart boltz
 sleep 5
 
+# Fund Boltz Bitcoin Core wallet for on-chain swaps (reverse swaps, chain swaps)
+log "Funding Boltz Bitcoin Core wallet..."
+boltz_wallet=$(docker exec bitcoin bitcoin-cli -regtest listwallets 2>/dev/null | jq -r '.[] | select(. != "" and . != "legacy" and . != "\"\"")' | head -1)
+if [ -n "$boltz_wallet" ]; then
+  boltz_addr=$(docker exec bitcoin bitcoin-cli -regtest -rpcwallet="$boltz_wallet" getnewaddress 2>/dev/null)
+  if [ -n "$boltz_addr" ]; then
+    $NIGIRI faucet "$boltz_addr" 5
+    log "Boltz wallet '$boltz_wallet' funded at $boltz_addr"
+  else
+    log "WARNING: Could not get address for Boltz wallet '$boltz_wallet'"
+  fi
+else
+  log "WARNING: No Boltz wallet found in Bitcoin Core"
+fi
+
 log "Verifying Boltz ARK/BTC pairs..."
 max_attempts=30
 attempt=1
 while [ $attempt -le $max_attempts ]; do
-  pairs=$(curl -s http://localhost:${NGINX_PORT}/v2/swap/submarine 2>/dev/null || echo "{}")
+  pairs=$(curl -s --connect-timeout 5 --max-time 15 http://localhost:${NGINX_PORT}/v2/swap/submarine 2>/dev/null || echo "{}")
   if echo "$pairs" | grep -q '"ARK"'; then
     log "Boltz ARK/BTC pairs loaded successfully"
     break
@@ -328,15 +675,26 @@ if [ $attempt -gt $max_attempts ]; then
 fi
 
 # ── Done ─────────────────────────────────────────────────────────────────────
-log "Development environment ready."
-log "\nServices available at:\n"
-log "Ark wallet: http://localhost:6060"
-log "Ark daemon: http://localhost:7070"
-log "Boltz API: http://localhost:${BOLTZ_API_PORT}"
-log "Boltz WebSocket: ws://localhost:${BOLTZ_WS_PORT}"
-log "CORS proxy: http://localhost:${NGINX_PORT}"
-log "Fulmine: http://localhost:${FULMINE_HTTP_PORT}"
-log "LND (nigiri): localhost:10009"
-log "boltz-lnd: localhost:${BOLTZ_LND_RPC_PORT}"
-log "Chopsticks (Bitcoin explorer): http://localhost:3000"
-log "NBXplorer: http://localhost:32838"
+echo ""
+echo "========================================"
+echo " Regtest environment ready"
+echo "========================================"
+echo ""
+echo "  Bitcoin RPC     http://localhost:18443"
+echo "  Esplora         http://localhost:3000"
+echo "  Arkd            http://localhost:7070"
+echo "  Ark Wallet      http://localhost:6060"
+echo "  Fulmine HTTP    http://localhost:${FULMINE_HTTP_PORT}"
+echo "  Fulmine API     http://localhost:${FULMINE_API_PORT}"
+echo "  Delegator gRPC  localhost:${DELEGATOR_GRPC_PORT}"
+echo "  Delegator API   http://localhost:${DELEGATOR_API_PORT}"
+echo "  Delegator HTTP  http://localhost:${DELEGATOR_HTTP_PORT}"
+echo "  Boltz CORS      http://localhost:${NGINX_PORT}  (nginx proxy)"
+echo "  Boltz gRPC      localhost:${BOLTZ_GRPC_PORT}"
+echo "  Boltz LND       localhost:${BOLTZ_LND_RPC_PORT}"
+echo ""
+echo "  Arkd password:  ${ARKD_PASSWORD}"
+if [ -n "${ARKD_IMAGE:-}" ]; then
+  echo "  Arkd image:     ${ARKD_IMAGE}"
+fi
+echo ""
