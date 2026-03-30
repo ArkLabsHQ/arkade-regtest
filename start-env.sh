@@ -549,6 +549,8 @@ else
     else
       log "WARNING: Could not get server wallet address, falling back to client funding"
       $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
+      # Convert onchain funds to offchain via redeem-notes
+      $NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD" 2>/dev/null || log "WARNING: redeem-notes failed (older arkd version?)"
     fi
   else
     # Nigiri's built-in arkd — use nigiri CLI for wallet init
@@ -583,6 +585,8 @@ else
     else
       log "WARNING: Could not get server wallet address, falling back to client funding"
       $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
+      # Convert onchain funds to offchain via redeem-notes
+      $NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD" 2>/dev/null || log "WARNING: redeem-notes failed (older arkd version?)"
     fi
   fi
 fi
