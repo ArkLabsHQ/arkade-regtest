@@ -643,17 +643,27 @@ sleep 5
 
 # Fund Boltz Bitcoin Core wallet for on-chain swaps (reverse swaps, chain swaps)
 log "Funding Boltz Bitcoin Core wallet..."
-boltz_wallet=$(docker exec bitcoin bitcoin-cli -regtest listwallets 2>/dev/null | jq -r '.[] | select(. != "" and . != "legacy" and . != "\"\"")' | head -1)
-if [ -n "$boltz_wallet" ]; then
+# Boltz uses preferredWallet = "core" which maps to Bitcoin Core's default wallet.
+# Try each wallet until we successfully fund one; fall back to the default ("") wallet.
+boltz_funded=false
+for boltz_wallet in $(docker exec bitcoin bitcoin-cli -regtest listwallets 2>/dev/null | jq -r '.[]' 2>/dev/null); do
   boltz_addr=$(docker exec bitcoin bitcoin-cli -regtest -rpcwallet="$boltz_wallet" getnewaddress 2>/dev/null)
   if [ -n "$boltz_addr" ]; then
     $NIGIRI faucet "$boltz_addr" 5
     log "Boltz wallet '$boltz_wallet' funded at $boltz_addr"
-  else
-    log "WARNING: Could not get address for Boltz wallet '$boltz_wallet'"
+    boltz_funded=true
+    break
   fi
-else
-  log "WARNING: No Boltz wallet found in Bitcoin Core"
+done
+if [ "$boltz_funded" = "false" ]; then
+  # Try default wallet (empty name)
+  boltz_addr=$(docker exec bitcoin bitcoin-cli -regtest getnewaddress 2>/dev/null)
+  if [ -n "$boltz_addr" ]; then
+    $NIGIRI faucet "$boltz_addr" 5
+    log "Boltz default wallet funded at $boltz_addr"
+  else
+    log "WARNING: Could not fund any Boltz wallet in Bitcoin Core"
+  fi
 fi
 
 log "Verifying Boltz ARK/BTC pairs..."
