@@ -209,6 +209,32 @@ services:
         echo "$$BOLTZ_CONFIG" > /home/boltz/.boltz/boltz.config
         boltzd --datadir /home/boltz/.boltz --configpath /home/boltz/.boltz/boltz.config
 
+  lnurl-server:
+    image: ${LNURL_IMAGE}
+    container_name: lnurl-server
+    ports:
+      - '${LNURL_PORT}:3000'
+    environment:
+      - PORT=3000
+      - BASE_URL=http://localhost:${LNURL_PORT}
+      - MIN_SENDABLE=1000
+      - MAX_SENDABLE=100000000000
+      - INVOICE_TIMEOUT_MS=30000
+    restart: unless-stopped
+
+  arkade-wallet:
+    image: ${WALLET_IMAGE}
+    container_name: arkade-wallet
+    ports:
+      - '${WALLET_PORT}:80'
+    environment:
+      - VITE_ARK_SERVER=http://localhost:7070
+      - VITE_BOLTZ_URL=http://localhost:${NGINX_PORT}
+      - VITE_NOSTR_RELAY_URL=ws://localhost:10547
+      - VITE_DELEGATOR_URL=http://localhost:${DELEGATOR_HTTP_PORT}
+      - VITE_LNURL_SERVER_URL=http://localhost:${LNURL_PORT}
+    restart: unless-stopped
+
 volumes:
   boltz_datadir:
   boltz_lnd_datadir:
