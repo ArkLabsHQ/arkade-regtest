@@ -153,7 +153,7 @@ services:
         rate = 1
         fee = 0.4
         swapInFee = 0.01
-        invoiceExpiry = 361
+        invoiceExpiry = 3600
         maxSwapAmount = 4294967
         minSwapAmount = 1000
 
