@@ -57,6 +57,8 @@ services:
       - FULMINE_UNLOCKER_PASSWORD=password
       - FULMINE_LND_URL=http://boltz-lnd:10009
       - FULMINE_LND_DATADIR=/root/.lnd
+      - FULMINE_DELEGATOR_ENABLED=true
+      - FULMINE_DELEGATOR_FEE=350
     ports:
       - ${FULMINE_HTTP_PORT}:7000
       - ${FULMINE_API_PORT}:7001
