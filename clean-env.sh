@@ -24,7 +24,7 @@ fi
 # ── Export vars for docker-compose interpolation ─────────────────────────────
 export ARKD_IMAGE ARKD_WALLET_IMAGE
 export BOLTZ_LND_IMAGE FULMINE_IMAGE BOLTZ_IMAGE NGINX_IMAGE
-export BOLTZ_LND_P2P_PORT BOLTZ_LND_RPC_PORT FULMINE_HTTP_PORT FULMINE_API_PORT
+export BOLTZ_LND_P2P_PORT BOLTZ_LND_RPC_PORT FULMINE_GRPC_PORT FULMINE_API_PORT FULMINE_HTTP_PORT
 export BOLTZ_GRPC_PORT BOLTZ_API_PORT BOLTZ_WS_PORT NGINX_PORT
 
 # ── Stop arkd override if custom image was used ──────────────────────────────

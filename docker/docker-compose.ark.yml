@@ -60,8 +60,9 @@ services:
       - FULMINE_DELEGATOR_ENABLED=true
       - FULMINE_DELEGATOR_FEE=350
     ports:
-      - ${FULMINE_HTTP_PORT}:7000
+      - ${FULMINE_GRPC_PORT}:7000
       - ${FULMINE_API_PORT}:7001
+      - ${FULMINE_HTTP_PORT}:7002
     volumes:
       - boltz_fulmine_datadir:/app/data
       - boltz_lnd_datadir:/root/.lnd
