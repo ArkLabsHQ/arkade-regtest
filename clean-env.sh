@@ -28,8 +28,8 @@ export BOLTZ_LND_P2P_PORT BOLTZ_LND_RPC_PORT FULMINE_GRPC_PORT FULMINE_API_PORT 
 export BOLTZ_GRPC_PORT BOLTZ_API_PORT BOLTZ_WS_PORT NGINX_PORT
 
 # ── Stop arkd override if custom image was used ──────────────────────────────
-if docker ps -a --format '{{.Names}}' | grep -q '^ark$' && \
-   [ -n "$(docker inspect ark --format '{{.Config.Image}}' 2>/dev/null | grep -v 'nigiri')" ]; then
+if docker ps -a --format '{{.Names}}' | grep -q '^arkd$' && \
+   [ -n "$(docker inspect arkd --format '{{.Config.Image}}' 2>/dev/null | grep -v 'nigiri')" ]; then
   log "Stopping custom arkd override containers..."
   docker compose -f "$SCRIPT_DIR/docker/docker-compose.arkd-override.yml" down --volumes --remove-orphans 2>/dev/null || true
 fi

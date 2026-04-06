@@ -153,7 +153,7 @@ setup_lnd_wallet() {
 setup_arkd_fees() {
   log "Configuring arkd intent fees..."
   local fee_response
-  fee_response=$(docker exec ark wget -qO- \
+  fee_response=$(docker exec arkd wget -qO- \
     --post-data="{\"fees\":{\"offchainInputFee\":\"${ARK_OFFCHAIN_INPUT_FEE}\",\"onchainInputFee\":\"${ARK_ONCHAIN_INPUT_FEE}\",\"offchainOutputFee\":\"${ARK_OFFCHAIN_OUTPUT_FEE}\",\"onchainOutputFee\":\"${ARK_ONCHAIN_OUTPUT_FEE}\"}}" \
     --header="Content-Type: application/json" \
     http://localhost:7071/v1/admin/intentFees 2>&1) || {
@@ -161,7 +161,7 @@ setup_arkd_fees() {
     return 0
   }
   local verify
-  verify=$(docker exec ark wget -qO- http://localhost:7071/v1/admin/intentFees 2>&1)
+  verify=$(docker exec arkd wget -qO- http://localhost:7071/v1/admin/intentFees 2>&1)
   log "arkd fees configured: $verify"
 }
 
@@ -407,8 +407,8 @@ if [ -n "${ARKD_IMAGE:-}" ]; then
   log "Custom ARKD_IMAGE set: $ARKD_IMAGE"
 
   # Stop and remove old arkd containers AND volumes to prevent stale state
-  docker stop ark ark-wallet 2>/dev/null || true
-  docker rm ark ark-wallet 2>/dev/null || true
+  docker stop arkd ark-wallet 2>/dev/null || true
+  docker rm arkd ark-wallet 2>/dev/null || true
   docker volume rm nigiri_ark_datadir nigiri_ark_wallet_datadir 2>/dev/null || true
   docker compose -f "$SCRIPT_DIR/docker/docker-compose.arkd-override.yml" pull
   docker compose -f "$SCRIPT_DIR/docker/docker-compose.arkd-override.yml" up -d
@@ -448,11 +448,11 @@ else
     if [ $attempt -gt $max_attempts ]; then
       log "ERROR: arkd admin endpoint failed to respond — dumping diagnostics"
       log "=== ark container status ==="
-      docker ps -a --filter name=ark --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>&1
+      docker ps -a --filter name=arkd --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>&1
       log "=== ark-wallet logs (last 30 lines) ==="
       docker logs ark-wallet 2>&1 | tail -30
       log "=== arkd logs (last 30 lines) ==="
-      docker logs ark 2>&1 | tail -30
+      docker logs arkd 2>&1 | tail -30
       exit 1
     fi
 
@@ -466,7 +466,7 @@ else
       seed=$(echo "$seed_resp" | jq -r '.seed // empty' 2>/dev/null || echo "")
       if [ -z "$seed" ]; then
         log "ERROR: Failed to generate wallet seed (response: $seed_resp)"
-        docker logs ark 2>&1 | tail -20
+        docker logs arkd 2>&1 | tail -20
         exit 1
       fi
       create_resp=$(curl -s -X POST http://localhost:7071/v1/admin/wallet/create \
@@ -509,7 +509,7 @@ else
       log "=== ark-wallet logs (last 30 lines) ==="
       docker logs ark-wallet 2>&1 | tail -30
       log "=== arkd logs (last 30 lines) ==="
-      docker logs ark 2>&1 | tail -30
+      docker logs arkd 2>&1 | tail -30
       exit 1
     fi
 
@@ -529,9 +529,9 @@ else
     if [ $attempt -gt $max_attempts ]; then
       log "ERROR: ark CLI failed to initialize — dumping diagnostics"
       log "=== container status ==="
-      docker ps -a --filter name=ark --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>&1
+      docker ps -a --filter name=arkd --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>&1
       log "=== arkd logs (last 50 lines) ==="
-      docker logs ark 2>&1 | tail -50
+      docker logs arkd 2>&1 | tail -50
       exit 1
     fi
 
