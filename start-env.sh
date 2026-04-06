@@ -513,29 +513,7 @@ else
       exit 1
     fi
 
-    # Step 3: init ark CLI (gRPC should be ready now that wallet is synced)
-    log "Initializing ark CLI..."
-    max_attempts=30
-    attempt=1
-    while [ $attempt -le $max_attempts ]; do
-      init_output=$(docker exec arkd arkd init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>&1) && {
-        log "ark CLI initialized"
-        break
-      }
-      log "ark CLI init retry... (attempt $attempt/$max_attempts) — $init_output"
-      sleep 3
-      ((attempt++))
-    done
-    if [ $attempt -gt $max_attempts ]; then
-      log "ERROR: ark CLI failed to initialize — dumping diagnostics"
-      log "=== container status ==="
-      docker ps -a --filter name=arkd --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>&1
-      log "=== arkd logs (last 50 lines) ==="
-      docker logs arkd 2>&1 | tail -50
-      exit 1
-    fi
-
-    # Step 4: fund SERVER wallet and generate blocks for fee estimation
+    # Step 3: fund SERVER wallet and generate blocks for fee estimation
     server_addr=$(curl -s http://localhost:7071/v1/admin/wallet/address | jq -r '.address // empty' 2>/dev/null)
     if [ -n "$server_addr" ]; then
       log "Funding arkd server wallet at $server_addr (21 txs for fee estimation)..."
