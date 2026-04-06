@@ -518,7 +518,7 @@ else
     max_attempts=30
     attempt=1
     while [ $attempt -le $max_attempts ]; do
-      if $NIGIRI ark init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>/dev/null; then
+      if docker exec arkd arkd init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>/dev/null; then
         log "ark CLI initialized"
         break
       fi
@@ -548,9 +548,11 @@ else
       log "Server wallet balance: $balance"
     else
       log "WARNING: Could not get server wallet address, falling back to client funding"
-      $NIGIRI faucet $($NIGIRI ark receive | jq -r ".onchain_address") "$ARKD_FAUCET_AMOUNT"
+      onchain_addr=$(docker exec arkd arkd receive 2>/dev/null | jq -r ".onchain_address")
+      $NIGIRI faucet "$onchain_addr" "$ARKD_FAUCET_AMOUNT"
       # Convert onchain funds to offchain via redeem-notes
-      $NIGIRI ark redeem-notes -n $($NIGIRI arkd note --amount 100000000) --password "$ARKD_PASSWORD" 2>/dev/null || log "WARNING: redeem-notes failed (older arkd version?)"
+      note=$(docker exec arkd arkd note --amount 100000000 2>/dev/null)
+      docker exec arkd arkd redeem-notes -n "$note" --password "$ARKD_PASSWORD" 2>/dev/null || log "WARNING: redeem-notes failed (older arkd version?)"
     fi
   else
     # Nigiri's built-in arkd — use nigiri CLI for wallet init
