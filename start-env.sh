@@ -518,11 +518,11 @@ else
     max_attempts=30
     attempt=1
     while [ $attempt -le $max_attempts ]; do
-      if docker exec arkd arkd init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>/dev/null; then
+      init_output=$(docker exec arkd arkd init --password "$ARKD_PASSWORD" --server-url localhost:7070 --explorer http://chopsticks:3000 2>&1) && {
         log "ark CLI initialized"
         break
-      fi
-      log "ark CLI init retry... (attempt $attempt/$max_attempts)"
+      }
+      log "ark CLI init retry... (attempt $attempt/$max_attempts) — $init_output"
       sleep 3
       ((attempt++))
     done
