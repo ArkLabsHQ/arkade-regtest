@@ -201,9 +201,23 @@ setup_fulmine_wallet() {
        -H "Content-Type: application/json" \
        -d '{"password": "password"}'
 
-  log "Checking Fulmine wallet status..."
-  local status_response=$(curl -s -X GET http://localhost:${FULMINE_API_PORT}/api/v1/wallet/status)
-  log "Wallet status: $status_response"
+  log "Waiting for Fulmine status to be ready..."
+  max_attempts=15
+  attempt=1
+  while [ $attempt -le $max_attempts ]; do
+    status_response=$(curl -s -X GET http://localhost:${FULMINE_API_PORT}/api/v1/wallet/status)
+    if [[ "$status_response" == '{"initialized":true, "synced":true, "unlocked":true}' ]]; then
+      log "Fulmine wallet is ready! $status_response"
+      break
+    fi
+    log "Waiting for Fulmine status to be ready... (attempt $attempt/$max_attempts)"
+    sleep 2
+    ((attempt++))
+  done
+  if [ $attempt -gt $max_attempts ]; then
+    log "ERROR: Fulmine wallet failed to become ready within expected time"
+    exit 1
+  fi
 
   log "Getting Fulmine wallet address..."
   max_attempts=5
