@@ -450,6 +450,7 @@ if [ "$NIGIRI_FRESH" = true ] && [ "${BITCOIN_LOW_FEE:-true}" = true ]; then
   # Restart chopsticks to reconnect after Bitcoin Core restart
   log "Restarting chopsticks block miner..."
   docker restart chopsticks
+
   # Restart nbxplorer only if it exists (not all stacks include it)
   # The container may be named "nbxplorer" or auto-named "nigiri-nbxplorer-1"
   NBXPLORER_CONTAINER=$(docker ps -a --format '{{.Names}}' | grep -E '^(nbxplorer|nigiri-nbxplorer)' | head -1)
@@ -458,10 +459,10 @@ if [ "$NIGIRI_FRESH" = true ] && [ "${BITCOIN_LOW_FEE:-true}" = true ]; then
     docker restart "$NBXPLORER_CONTAINER"
     sleep 5
     log "Waiting for nbxplorer to sync after restart..."
-    max_attempts=30
+    max_attempts=10
     attempt=1
     while [ $attempt -le $max_attempts ]; do
-      if docker exec "$NBXPLORER_CONTAINER" curl -s http://localhost:32838/v1/cryptos/btc/status 2>/dev/null | grep -q '"isFullySynced":true'; then
+      if curl -s http://localhost:32838/v1/cryptos/btc/status 2>/dev/null | grep -q '"isFullySynched":true'; then
         log "nbxplorer is fully synced"
         break
       fi
