@@ -201,12 +201,16 @@ setup_fulmine_wallet() {
        -H "Content-Type: application/json" \
        -d '{"password": "password"}'
 
+  
   log "Waiting for Fulmine status to be ready..."
   max_attempts=15
   attempt=1
   while [ $attempt -le $max_attempts ]; do
-    status_response=$(curl -s -X GET http://localhost:${FULMINE_API_PORT}/api/v1/wallet/status)
-    if [[ "$status_response" == '{"initialized":true, "synced":true, "unlocked":true}' ]]; then
+    local status_response=$(curl -s -X GET http://localhost:${FULMINE_API_PORT}/api/v1/wallet/status)
+    local synced=$(echo "$status_response" | jq -r '.synced // false')
+    local unlocked=$(echo "$status_response" | jq -r '.unlocked // false')
+    local initialized=$(echo "$status_response" | jq -r '.initialized // false')
+    if [ "$initialized" = "true" ] && [ "$synced" = "true" ] && [ "$unlocked" = "true" ]; then
       log "Fulmine wallet is ready! $status_response"
       break
     fi
@@ -300,6 +304,27 @@ setup_delegator_wallet() {
        -H "Content-Type: application/json" \
        -d '{"password": "password"}'
 
+  log "Waiting for delegator status to be ready..."
+  max_attempts=15
+  attempt=1
+  while [ $attempt -le $max_attempts ]; do
+    local status_response=$(curl -s -X GET http://localhost:${DELEGATOR_API_PORT}/api/v1/wallet/status)
+    local synced=$(echo "$status_response" | jq -r '.synced // false')
+    local unlocked=$(echo "$status_response" | jq -r '.unlocked // false')
+    local initialized=$(echo "$status_response" | jq -r '.initialized // false')
+    if [ "$initialized" = "true" ] && [ "$synced" = "true" ] && [ "$unlocked" = "true" ]; then
+      log "Delegator wallet is ready! $status_response"
+      break
+    fi
+    log "Waiting for delegator status to be ready... (attempt $attempt/$max_attempts)"
+    sleep 2
+    ((attempt++))
+  done
+  if [ $attempt -gt $max_attempts ]; then
+    log "ERROR: Delegator wallet failed to become ready within expected time"
+    exit 1
+  fi
+  
   # Fund delegator wallet
   log "Getting delegator address..."
   max_attempts=5
