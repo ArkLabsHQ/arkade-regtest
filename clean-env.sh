@@ -45,13 +45,17 @@ log "Stopping nigiri..."
 $NIGIRI stop --delete || true
 
 # nigiri stop --delete may fail to remove volumes owned by container users (e.g. postgres).
-# Fix ownership so the current user can clean them, then let nigiri recreate on next start.
+# Use a Docker container to remove them (runs as root, no sudo required).
 NIGIRI_DATA="${HOME}/.nigiri"
 if [ -d "$NIGIRI_DATA/volumes" ]; then
   log "Removing nigiri volumes..."
-  sudo chown -R "$(id -u):$(id -g)" "$NIGIRI_DATA/volumes" 2>/dev/null || true
+  docker run --rm -v "$NIGIRI_DATA/volumes:/vol" alpine sh -c 'rm -rf /vol/* /vol/.[!.]*' 2>/dev/null || true
   rm -rf "$NIGIRI_DATA/volumes" 2>/dev/null || true
 fi
+
+# Remove compose file and config so nigiri regenerates them from its template
+# on next start. Prevents stale compose files (e.g. system vs dev nigiri mismatch).
+rm -f "$NIGIRI_DATA/docker-compose.yml" "$NIGIRI_DATA/nigiri.config.json" 2>/dev/null || true
 
 # ── Optionally remove _build/ ────────────────────────────────────────────────
 if [[ "${CLEAN_BUILD:-false}" == "true" ]]; then
