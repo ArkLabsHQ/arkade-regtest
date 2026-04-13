@@ -348,6 +348,11 @@ setup_delegator_wallet() {
 
 resolve_nigiri
 
+# ── Ensure GID is exported for docker-compose user mapping ─────────────────
+# Bash sets UID automatically; GID is not set, so docker-compose falls back to
+# 1000 which may not match the host user's group, causing permission errors.
+export GID=$(id -g)
+
 # ── Clean if requested ───────────────────────────────────────────────────────
 if [ "$CLEAN" = true ]; then
   export USER_ENV
@@ -364,25 +369,53 @@ else
   $NIGIRI update || log "Nigiri update failed, continuing with existing images..."
 
   log "Starting Nigiri with Ark and LN support..."
-  $NIGIRI start --ark --ln || log "Nigiri may already be running, continuing..."
+  if ! $NIGIRI start --ark --ln; then
+    # Only tolerate the error if nigiri actually started (bitcoin is running)
+    if ! docker ps --format '{{.Names}}' | grep -q '^bitcoin$'; then
+      log "ERROR: nigiri start failed and bitcoin is not running."
+      log "Try: ./clean-env.sh and then restart."
+      exit 1
+    fi
+    log "Nigiri may already be running, continuing..."
+  fi
+
+  # If bitcoin is crash-looping (e.g. can't write settings.json due to root-owned
+  # volume dirs), fix ownership of just the bitcoin data dir and restart it.
+  sleep 5
+  if ! docker exec bitcoin bitcoin-cli -regtest getblockchaininfo >/dev/null 2>&1; then
+    BITCOIN_VOL="${HOME}/.nigiri/volumes/bitcoin"
+    if [ -d "$BITCOIN_VOL" ] && [ "$(stat -c '%u' "$BITCOIN_VOL" 2>/dev/null || stat -f '%u' "$BITCOIN_VOL" 2>/dev/null)" != "$(id -u)" ]; then
+      log "Fixing bitcoin volume permissions..."
+      docker run --rm -v "$BITCOIN_VOL:/vol" alpine chown -R "$(id -u):$(id -g)" /vol
+      docker restart bitcoin
+      sleep 5
+    fi
+  fi
 fi
 
 # ── Bitcoin Core low-fee config (optional — restarts bitcoin, chopsticks, nbxplorer) ──
 if [ "$NIGIRI_FRESH" = true ] && [ "${BITCOIN_LOW_FEE:-true}" = true ]; then
+  # Sanity check: bitcoin.conf must contain the regtest config written by nigiri.
+  # If it's missing, nigiri didn't initialize properly (stale volumes, failed cleanup).
+  if ! docker exec bitcoin grep -q 'regtest=1' /data/.bitcoin/bitcoin.conf 2>/dev/null; then
+    log "ERROR: bitcoin.conf is missing regtest=1 — volumes may be stale."
+    log "Run: ./clean-env.sh and then restart."
+    exit 1
+  fi
   log "Configuring Bitcoin Core to accept low-fee transactions..."
   docker exec bitcoin sh -c 'printf "\nminrelaytxfee=0.0\nmintxfee=0.0\n" >> /data/.bitcoin/bitcoin.conf'
   docker restart bitcoin
-  sleep 3
+  sleep 5
   log "Bitcoin Core restarted with minrelaytxfee=0 and mintxfee=0"
   log "Waiting for Bitcoin Core to be ready after restart..."
-  max_attempts=15
+  max_attempts=30
   attempt=1
   while [ $attempt -le $max_attempts ]; do
     if docker exec bitcoin bitcoin-cli -regtest getblockchaininfo >/dev/null 2>&1; then
       log "Bitcoin Core is ready"
       break
     fi
-    sleep 2
+    sleep 3
     ((attempt++))
   done
   if [ $attempt -gt $max_attempts ]; then
@@ -393,15 +426,17 @@ if [ "$NIGIRI_FRESH" = true ] && [ "${BITCOIN_LOW_FEE:-true}" = true ]; then
   log "Restarting chopsticks block miner..."
   docker restart chopsticks
   # Restart nbxplorer only if it exists (not all stacks include it)
-  if docker inspect nbxplorer >/dev/null 2>&1; then
-    log "Restarting nbxplorer..."
-    docker restart nbxplorer
+  # The container may be named "nbxplorer" or auto-named "nigiri-nbxplorer-1"
+  NBXPLORER_CONTAINER=$(docker ps -a --format '{{.Names}}' | grep -E '^(nbxplorer|nigiri-nbxplorer)' | head -1)
+  if [ -n "$NBXPLORER_CONTAINER" ]; then
+    log "Restarting nbxplorer ($NBXPLORER_CONTAINER)..."
+    docker restart "$NBXPLORER_CONTAINER"
     sleep 5
     log "Waiting for nbxplorer to sync after restart..."
-    max_attempts=20
+    max_attempts=30
     attempt=1
     while [ $attempt -le $max_attempts ]; do
-      if docker exec nbxplorer curl -s http://localhost:32838/v1/cryptos/btc/status 2>/dev/null | grep -q '"isFullySynced":true'; then
+      if docker exec "$NBXPLORER_CONTAINER" curl -s http://localhost:32838/v1/cryptos/btc/status 2>/dev/null | grep -q '"isFullySynced":true'; then
         log "nbxplorer is fully synced"
         break
       fi
