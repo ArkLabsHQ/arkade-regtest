@@ -10,7 +10,7 @@ log() {
 
 # ── Parse arguments ──────────────────────────────────────────────────────────
 CLEAN_BUILD=false
-PRUNE_VOLUMES=false
+PRUNE_IMAGES=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
