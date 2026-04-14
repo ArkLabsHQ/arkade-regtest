@@ -19,7 +19,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --prune)
-      PRUNE_VOLUMES=true
+      PRUNE_IMAGES=true
       shift
       ;;
     *)
