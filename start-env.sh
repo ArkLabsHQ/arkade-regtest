@@ -248,7 +248,7 @@ setup_fulmine_wallet() {
 
   # Mine blocks to confirm boarding UTXO before settling
   log "Mining blocks for Fulmine boarding confirmation..."
-  $NIGIRI rpc --generate 3"
+  $NIGIRI rpc --generate 3
   sleep 10
 
   log "Settling Fulmine wallet..."
