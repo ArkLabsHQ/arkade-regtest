@@ -761,6 +761,7 @@ echo "  Boltz gRPC      localhost:${BOLTZ_GRPC_PORT}"
 echo "  Boltz LND       localhost:${BOLTZ_LND_RPC_PORT}"
 echo ""
 echo "  Arkd password:  ${ARKD_PASSWORD}"
+echo "  VTXO expire:    ${ARKD_VTXO_TREE_EXPIRY}"
 if [ -n "${ARKD_IMAGE:-}" ]; then
   echo "  Arkd image:     ${ARKD_IMAGE}"
 fi
