@@ -258,11 +258,12 @@ setup_fulmine_wallet() {
 
   # Wait for batch round and mine commitment tx
   sleep 15
-  $NIGIRI rpc generatetoaddress 3 "$($NIGIRI rpc getnewaddress)"
+  $NIGIRI rpc --generate 3
   sleep 3
 
   log "Getting transaction history..."
   curl -s --max-time 30 -X GET http://localhost:${FULMINE_API_PORT}/api/v1/transactions || true
+  echo ""
 
   log "Fulmine wallet setup completed successfully!"
 }
@@ -351,8 +352,8 @@ setup_delegator_wallet() {
 
   # Mine blocks to confirm boarding UTXO before settling
   log "Mining blocks for delegator boarding confirmation..."
-  $NIGIRI rpc generatetoaddress 3 "$($NIGIRI rpc getnewaddress)"
-  sleep 5
+  $NIGIRI rpc --generate 3
+  sleep 10
 
   log "Settling delegator wallet..."
   if ! timeout 120 curl -s --max-time 110 -X GET http://localhost:${DELEGATOR_API_PORT}/api/v1/settle; then
@@ -361,8 +362,12 @@ setup_delegator_wallet() {
 
   # Wait for batch round and mine commitment tx
   sleep 15
-  $NIGIRI rpc generatetoaddress 3 "$($NIGIRI rpc getnewaddress)"
+  $NIGIRI rpc --generate 3
   sleep 3
+
+  log "Getting transaction history..."
+  curl -s --max-time 30 -X GET http://localhost:${DELEGATOR_API_PORT}/api/v1/transactions || true
+  echo ""
 
   log "Delegator wallet setup completed!"
 }
@@ -453,7 +458,6 @@ if [ "$NIGIRI_FRESH" = true ] && [ "${BITCOIN_LOW_FEE:-true}" = true ]; then
 
   # Restart nbxplorer only if it exists (not all stacks include it)
   # The container may be named "nbxplorer" or auto-named "nigiri-nbxplorer-1"
-  docker ps -a --format '{{.Names}}'
   NBXPLORER_CONTAINER=$(docker ps -a --format '{{.Names}}' | grep -E '^(nbxplorer|nigiri-nbxplorer)' | head -1)
   log "Found nbxplorer container: $NBXPLORER_CONTAINER"
   if [ -n "$NBXPLORER_CONTAINER" ]; then
