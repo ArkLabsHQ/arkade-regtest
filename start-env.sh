@@ -453,7 +453,9 @@ if [ "$NIGIRI_FRESH" = true ] && [ "${BITCOIN_LOW_FEE:-true}" = true ]; then
 
   # Restart nbxplorer only if it exists (not all stacks include it)
   # The container may be named "nbxplorer" or auto-named "nigiri-nbxplorer-1"
+  docker ps -a --format '{{.Names}}'
   NBXPLORER_CONTAINER=$(docker ps -a --format '{{.Names}}' | grep -E '^(nbxplorer|nigiri-nbxplorer)' | head -1)
+  log "Found nbxplorer container: $NBXPLORER_CONTAINER"
   if [ -n "$NBXPLORER_CONTAINER" ]; then
     log "Restarting nbxplorer ($NBXPLORER_CONTAINER)..."
     docker restart "$NBXPLORER_CONTAINER"
