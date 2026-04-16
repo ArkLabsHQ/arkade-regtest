@@ -248,7 +248,7 @@ setup_fulmine_wallet() {
 
   # Mine blocks to confirm boarding UTXO before settling
   log "Mining blocks for Fulmine boarding confirmation..."
-  $NIGIRI rpc generatetoaddress 3 "$($NIGIRI rpc getnewaddress)"
+  $NIGIRI rpc --generate 3
   sleep 10
 
   log "Settling Fulmine wallet..."
@@ -258,7 +258,7 @@ setup_fulmine_wallet() {
 
   # Wait for batch round and mine commitment tx
   sleep 15
-  $NIGIRI rpc generatetoaddress 3 "$($NIGIRI rpc getnewaddress)"
+  $NIGIRI rpc --generate 3
   sleep 3
 
   log "Getting transaction history..."
@@ -352,7 +352,7 @@ setup_delegator_wallet() {
 
   # Mine blocks to confirm boarding UTXO before settling
   log "Mining blocks for delegator boarding confirmation..."
-  $NIGIRI rpc generatetoaddress 3 "$($NIGIRI rpc getnewaddress)"
+  $NIGIRI rpc --generate 3
   sleep 10
 
   log "Settling delegator wallet..."
