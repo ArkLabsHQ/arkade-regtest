@@ -365,6 +365,10 @@ setup_delegator_wallet() {
   $NIGIRI rpc --generate 3
   sleep 3
 
+  log "Getting transaction history..."
+  curl -s --max-time 30 -X GET http://localhost:${DELEGATOR_API_PORT}/api/v1/transactions || true
+  echo ""
+
   log "Delegator wallet setup completed!"
 }
 
