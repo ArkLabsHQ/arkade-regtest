@@ -8,6 +8,27 @@ log() {
   echo -e "\033[0;32m[$(date '+%H:%M:%S')] $1\033[0m"
 }
 
+# ── Parse arguments ──────────────────────────────────────────────────────────
+CLEAN_BUILD=false
+PRUNE_IMAGES=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --build)
+      CLEAN_BUILD=true
+      shift
+      ;;
+    --prune)
+      PRUNE_IMAGES=true
+      shift
+      ;;
+    *)
+      log "Unknown argument: $1"
+      exit 1
+      ;;
+  esac
+done
+
 # ── Load environment ─────────────────────────────────────────────────────────
 source "$SCRIPT_DIR/lib/env.sh"
 load_env "$SCRIPT_DIR"
@@ -58,9 +79,15 @@ fi
 rm -f "$NIGIRI_DATA/docker-compose.yml" "$NIGIRI_DATA/nigiri.config.json" 2>/dev/null || true
 
 # ── Optionally remove _build/ ────────────────────────────────────────────────
-if [[ "${CLEAN_BUILD:-false}" == "true" ]]; then
+if [[ "$CLEAN_BUILD" = true ]]; then
   log "Removing _build/ directory..."
   rm -rf "$SCRIPT_DIR/_build"
+fi
+
+# Remove any dangling images that may have been left behind by build scripts
+if [[ "$PRUNE_IMAGES" = true ]]; then
+  log "Removing dangling Docker images..."
+  docker image prune -f
 fi
 
 log "Clean-up complete."
