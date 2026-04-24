@@ -62,12 +62,22 @@ log "Stopping ark overlay stack..."
 docker compose -f "$SCRIPT_DIR/docker/docker-compose.ark.yml" down --volumes --remove-orphans || true
 
 # ── Stop nigiri ──────────────────────────────────────────────────────────────
+NIGIRI_DATA="${HOME}/.nigiri"
+
+# Normalize volume ownership first. nigiri stop --delete runs its rm as the
+# current user, but container workloads (e.g. postgres) write files as root or
+# as an in-container UID, so those files can't be removed without sudo. Chown
+# via a throwaway root container so nigiri's own cleanup succeeds cleanly.
+if [ -d "$NIGIRI_DATA/volumes" ]; then
+  docker run --rm -v "$NIGIRI_DATA/volumes:/vol" alpine \
+    chown -R "$(id -u):$(id -g)" /vol 2>/dev/null || true
+fi
+
 log "Stopping nigiri..."
 $NIGIRI stop --delete || true
 
-# nigiri stop --delete may fail to remove volumes owned by container users (e.g. postgres).
-# Use a Docker container to remove them (runs as root, no sudo required).
-NIGIRI_DATA="${HOME}/.nigiri"
+# Belt-and-braces: if nigiri's delete still left anything behind, wipe it via
+# a root container.
 if [ -d "$NIGIRI_DATA/volumes" ]; then
   log "Removing nigiri volumes..."
   docker run --rm -v "$NIGIRI_DATA/volumes:/vol" alpine sh -c 'rm -rf /vol/* /vol/.[!.]*' 2>/dev/null || true
