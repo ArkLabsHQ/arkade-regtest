@@ -165,8 +165,15 @@ services:
         minSwapAmount = 1000
 
         [pairs.timeoutDelta]
+        # Regtest-tuned: chain timeout reduced from production 1440 (10 days
+        # at 10-min blocks) to 144 (1 day) so the no-fund expiry E2E
+        # (BtcToArkChainSwapMarksFailedWhenUserDoesNotFund) can drive a
+        # swap.expired transition by mining ~150 blocks instead of waiting
+        # wall-clock days. 144 is still well above happy-path lifetime
+        # (chain swap settles in <60s ≈ 6-12 mined blocks), so the change
+        # doesn't put the happy-path tests at risk of premature expiry.
         reverse = 1440
-        chain=1440
+        chain=144
         swapMinimal = 1440
         swapMaximal = 2880
         swapTaproot = 10080
