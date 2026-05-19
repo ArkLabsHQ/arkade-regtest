@@ -242,6 +242,23 @@ services:
       - VITE_LNURL_SERVER_URL=http://localhost:${LNURL_PORT}
     restart: unless-stopped
 
+  # WebSocket bridge for the bitcoin Electrum endpoint. Browser/JS clients
+  # cannot open raw TCP sockets, so websocat translates between WS text
+  # frames (one JSON-RPC per frame, no trailing newline — matching fulcrum's
+  # -w semantics) and electrs's line-delimited TCP Electrum protocol.
+  # Mirrors vulpemventures/nigiri#258 while that PR is unmerged upstream.
+  electrum-ws:
+    image: ghcr.io/vi/websocat:latest
+    container_name: electrum-ws
+    command:
+      - --text
+      - --linemode-strip-newlines
+      - ws-l:0.0.0.0:50003
+      - tcp:electrs:50000
+    ports:
+      - '50003:50003'
+    restart: unless-stopped
+
 volumes:
   boltz_datadir:
   boltz_lnd_datadir:
