@@ -145,7 +145,7 @@ services:
   fulmine-delegator:
     image: ${FULMINE_IMAGE:-ghcr.io/arklabshq/fulmine:v0.3.23}
     container_name: fulmine-delegator
-    profiles: ["fulmine"]
+    profiles: ["delegate"]
     environment:
       - FULMINE_ARK_SERVER=http://arkd:7070
       - FULMINE_ESPLORA_URL=http://mempool_web/api

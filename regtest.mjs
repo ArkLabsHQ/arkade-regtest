@@ -8,7 +8,7 @@
 //   node regtest.mjs mine [n]
 //
 // Profiles (and their dependencies) let you bring up a subset of the stack:
-//   ark → base,  fulmine → ark,  boltz → ark,  emulator → ark,
+//   ark → base,  delegate → ark,  boltz → ark,  emulator → ark,
 //   solver → ark + emulator. `--profile boltz` brings up base+ark+boltz.
 //   Selection precedence: --profile flags > REGTEST_PROFILES env (comma-list)
 //   > full stack.
@@ -31,7 +31,7 @@ import { createInvoice, payInvoice } from './lib/invoice.mjs';
 const PROFILE_DEPS = {
   base: [],
   ark: ['base'],
-  fulmine: ['ark'], // standalone fulmine-delegator
+  delegate: ['ark'], // standalone fulmine-delegator
   boltz: ['ark'], // boltz + its own boltz-fulmine + boltz-lnd (independent of the delegator)
   emulator: ['ark'],
   solver: ['ark', 'emulator'],
@@ -99,7 +99,7 @@ function banner(active) {
     lines.push(`  Web Wallet      http://localhost:${env('WALLET_PORT', '3003')}`);
     lines.push(`  Explorer        http://localhost:${env('EXPLORER_PORT', '7080')}`);
   }
-  if (active.has('fulmine')) {
+  if (active.has('delegate')) {
     lines.push(`  Delegator API   http://localhost:${env('DELEGATOR_API_PORT', '7011')}`);
   }
   if (active.has('boltz')) {
@@ -159,7 +159,7 @@ async function start(opts) {
   );
 
   if (active.has('ark')) await setupArkd();
-  if (active.has('fulmine')) await setupDelegator();
+  if (active.has('delegate')) await setupDelegator();
   if (active.has('boltz')) {
     await setupFulmine(); // boltz-fulmine lives in the boltz profile
     await setupBoltz();

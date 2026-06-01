@@ -59,7 +59,7 @@ Services are grouped into compose profiles so you can bring up just the tier you
 | ---------- | ----------------------------------------------------------------- | ----------------- |
 | `base`     | bitcoin, postgres, nbxplorer, fulcrum, mempool (api/web/db), lnd  | —                 |
 | `ark`      | arkd, arkd-wallet, arkade-wallet, arkade-explorer                 | `base`            |
-| `fulmine`  | fulmine-delegator                                                 | `ark`             |
+| `delegate` | fulmine-delegator                                                 | `ark`             |
 | `boltz`    | boltz, boltz-fulmine, boltz-lnd, nginx-boltz, lnurl-server        | `ark`             |
 | `emulator` | emulator                                                          | `ark`             |
 | `solver`   | solver                                                            | `ark`, `emulator` |
