@@ -51,6 +51,30 @@ arkd and Fulmine consume the **Esplora-compatible REST API that mempool serves u
 
 Configuration files for the chain and counterparty LND node live in `docker/conf/`.
 
+## Profiles
+
+Services are grouped into compose profiles so you can bring up just the tier you need. The CLI resolves the dependency closure automatically:
+
+| Profile    | Services                                                        | Depends on        |
+| ---------- | --------------------------------------------------------------- | ----------------- |
+| `base`     | bitcoin, postgres, nbxplorer, fulcrum, mempool (api/web/db), lnd | —                 |
+| `ark`      | arkd, arkd-wallet                                               | `base`            |
+| `fulmine`  | boltz-fulmine, fulmine-delegator, boltz-lnd                    | `ark`             |
+| `boltz`    | boltz, nginx-boltz, lnurl-server, arkade-wallet                | `fulmine`         |
+| `emulator` | emulator                                                        | `ark`             |
+| `solver`   | solver                                                          | `ark`, `emulator` |
+
+```bash
+node regtest.mjs start                      # full stack (all profiles)
+node regtest.mjs start --profile base       # just the chain + explorer
+node regtest.mjs start --profile ark        # base + ark
+node regtest.mjs start --profile boltz      # base + ark + fulmine + boltz
+node regtest.mjs start --profile solver     # base + ark + emulator + solver
+node regtest.mjs start --profile emulator --profile boltz   # combine targets
+```
+
+`stop` and `clean` always act on the whole project regardless of profiles.
+
 ## Configuration
 
 All defaults live in `.env.defaults`. Overrides are discovered in this priority order:
@@ -66,8 +90,8 @@ Variables in the override file replace their `.env.defaults` counterparts; unspe
 arkd is always run from `ARKD_IMAGE` / `ARKD_WALLET_IMAGE` (there is no built-in fallback). Pin a version in your override file:
 
 ```bash
-ARKD_IMAGE=ghcr.io/arkade-os/arkd:v0.9.4
-ARKD_WALLET_IMAGE=ghcr.io/arkade-os/arkd-wallet:v0.9.4
+ARKD_IMAGE=ghcr.io/arkade-os/arkd:v0.9.6
+ARKD_WALLET_IMAGE=ghcr.io/arkade-os/arkd-wallet:v0.9.6
 ```
 
 ### Emulator (arkade-script signing service)
@@ -96,6 +120,8 @@ EMULATOR_IMAGE=
 | Boltz LND RPC      | `localhost:10010`                      | 10010        |
 | Web wallet         | `http://localhost:3003`                | 3003         |
 | Emulator           | `http://localhost:7073`                | 7073         |
+| Solver HTTP        | `http://localhost:7091`                | 7091         |
+| Solver gRPC        | `localhost:7090`                       | 7090         |
 
 ## Using as a git submodule
 

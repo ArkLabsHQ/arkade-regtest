@@ -48,6 +48,10 @@ jobs:
           echo "== Emulator =="
           curl -sf http://localhost:7073/v1/info | jq -e '.signerPubkey != null'
 
+          echo "== Solver =="
+          # solverd's HTTP root may return a non-2xx; any HTTP code (not 000) means it's listening.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:7091/)" != "000"
+
       - name: Exercise the mine helper
         run: |
           set -euo pipefail
@@ -66,7 +70,7 @@ jobs:
         if: failure()
         run: |
           docker compose -f docker/compose.base.yml -f docker/compose.ark.yml ps || true
-          for c in bitcoin fulcrum mempool_api mempool_web nbxplorer arkd-wallet arkd boltz boltz-lnd boltz-fulmine; do
+          for c in bitcoin fulcrum mempool_api mempool_web nbxplorer arkd-wallet arkd boltz boltz-lnd boltz-fulmine emulator solver; do
             echo "===== logs: $c ====="
             docker logs --tail 80 "$c" 2>&1 || true
           done

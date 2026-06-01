@@ -17,8 +17,9 @@ name: arkade-regtest
 services:
   # ── arkd wallet (signer + on-chain wallet, backed by nbxplorer) ────────────
   arkd-wallet:
-    image: ${ARKD_WALLET_IMAGE:-ghcr.io/arkade-os/arkd-wallet:v0.9.4}
+    image: ${ARKD_WALLET_IMAGE:-ghcr.io/arkade-os/arkd-wallet:v0.9.6}
     container_name: arkd-wallet
+    profiles: ["ark"]
     restart: unless-stopped
     depends_on:
       - bitcoin
@@ -35,8 +36,9 @@ services:
 
   # ── arkd (Ark server) ──────────────────────────────────────────────────────
   arkd:
-    image: ${ARKD_IMAGE:-ghcr.io/arkade-os/arkd:v0.9.4}
+    image: ${ARKD_IMAGE:-ghcr.io/arkade-os/arkd:v0.9.6}
     container_name: arkd
+    profiles: ["ark"]
     restart: unless-stopped
     depends_on:
       - arkd-wallet
@@ -73,6 +75,7 @@ services:
     image: ${BOLTZ_LND_IMAGE:-btcpayserver/lnd:v0.19.3-beta}
     restart: unless-stopped
     container_name: boltz-lnd
+    profiles: ["fulmine"]
     environment:
       LND_CHAIN: 'btc'
       LND_ENVIRONMENT: 'regtest'
@@ -116,6 +119,7 @@ services:
   boltz-fulmine:
     image: ${FULMINE_IMAGE:-ghcr.io/arklabshq/fulmine:v0.3.23}
     container_name: boltz-fulmine
+    profiles: ["fulmine"]
     environment:
       - FULMINE_ARK_SERVER=http://arkd:7070
       - FULMINE_ESPLORA_URL=http://mempool_web/api
@@ -141,6 +145,7 @@ services:
   fulmine-delegator:
     image: ${FULMINE_IMAGE:-ghcr.io/arklabshq/fulmine:v0.3.23}
     container_name: fulmine-delegator
+    profiles: ["fulmine"]
     environment:
       - FULMINE_ARK_SERVER=http://arkd:7070
       - FULMINE_ESPLORA_URL=http://mempool_web/api
@@ -161,6 +166,7 @@ services:
   boltz:
     image: ${BOLTZ_IMAGE:-boltz/boltz:latest}
     container_name: boltz
+    profiles: ["boltz"]
     restart: unless-stopped
     ports:
       - '${BOLTZ_GRPC_PORT:-9000}:9000'
@@ -270,9 +276,9 @@ services:
           sleep 1
         done
 
-        # Create database if it doesn't exist
-        PGPASSWORD=$$POSTGRES_PASSWORD psql -h postgres -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'boltz'" | grep -q 1 || \
-        PGPASSWORD=$$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE boltz"
+        # Create database if it doesn't exist (postgres uses trust auth here)
+        PGPASSWORD=postgres psql -h postgres -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'boltz'" | grep -q 1 || \
+        PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE DATABASE boltz"
 
         # Start boltzd
         echo "$$BOLTZ_CONFIG" > /home/boltz/.boltz/boltz.config
@@ -282,6 +288,7 @@ services:
   nginx-boltz:
     image: ${NGINX_IMAGE:-nginx:alpine}
     container_name: nginx-boltz
+    profiles: ["boltz"]
     restart: unless-stopped
     ports:
       - '${NGINX_PORT:-9069}:9069'
@@ -294,6 +301,7 @@ services:
   lnurl-server:
     image: ${LNURL_IMAGE:-ghcr.io/arklabshq/lnurl-server:0.1.0}
     container_name: lnurl-server
+    profiles: ["boltz"]
     ports:
       - '${LNURL_PORT:-9090}:3000'
     environment:
@@ -308,6 +316,7 @@ services:
   arkade-wallet:
     image: ${WALLET_IMAGE:-ghcr.io/arkade-os/wallet:latest}
     container_name: arkade-wallet
+    profiles: ["boltz"]
     ports:
       - '${WALLET_PORT:-3003}:80'
     environment:
@@ -337,6 +346,30 @@ services:
       - type: tmpfs
         target: /app/data
 
+  # ── Solver (arkade virtual-mempool intent solver) — profile `solver` ───────
+  # Depends on arkd (SOLVER_ARK_URL) and the emulator (SOLVER_EMULATOR_URL), so
+  # the orchestrator's `solver` profile also pulls in `ark` and `emulator`.
+  # solverd's own listeners stay on the in-container 7070/7071 defaults; only
+  # the host ports are remapped (7090/7091) to avoid colliding with arkd.
+  solver:
+    image: ${SOLVER_IMAGE:-ghcr.io/arkade-os/solver:v0.0.1-rc.2}
+    container_name: solver
+    profiles: ["solver"]
+    restart: unless-stopped
+    depends_on:
+      - arkd
+    environment:
+      SOLVER_ARK_URL: arkd:7070
+      SOLVER_EMULATOR_URL: http://emulator:7073
+      SOLVER_WALLET_SEED: ${SOLVER_WALLET_SEED}
+      SOLVER_WALLET_PASSWORD: ${SOLVER_WALLET_PASSWORD:-password}
+      SOLVER_LOG_LEVEL: ${SOLVER_LOG_LEVEL:-4}
+    ports:
+      - '${SOLVER_GRPC_PORT:-7090}:7070'
+      - '${SOLVER_HTTP_PORT:-7091}:7071'
+    volumes:
+      - solver_datadir:/app/data
+
 volumes:
   ark_wallet_datadir:
   ark_datadir:
@@ -344,3 +377,4 @@ volumes:
   boltz_lnd_datadir:
   boltz_fulmine_datadir:
   fulmine_delegator_datadir:
+  solver_datadir:

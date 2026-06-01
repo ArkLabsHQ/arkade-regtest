@@ -1,31 +1,65 @@
 #!/usr/bin/env node
 // arkade-regtest orchestrator — cross-platform, zero-dependency.
 //
-//   node regtest.mjs start [--env <path>] [--clean]
+//   node regtest.mjs start [--env <path>] [--clean] [--profile <name>...]
 //   node regtest.mjs stop
 //   node regtest.mjs clean [--prune]
 //   node regtest.mjs faucet <address> <amountBtc>
 //   node regtest.mjs mine [n]
 //
+// Profiles (and their dependencies) let you bring up a subset of the stack:
+//   base → ark → fulmine → boltz,  emulator → ark,  solver → ark + emulator.
+// `--profile boltz` brings up base+ark+fulmine+boltz; no --profile = full stack.
+//
 // Replaces the old bash scripts + the nigiri binary entirely.
 import { loadEnv, env } from './lib/env.mjs';
 import { log, warn, fail } from './lib/log.mjs';
-import { ROOT, composeUp, composeStop, composeDown } from './lib/compose.mjs';
+import { ROOT, composeUp, composeStop, composeDown, ALL_PROFILES } from './lib/compose.mjs';
 import { docker } from './lib/proc.mjs';
 import { sleep, waitForOrFail, httpOk, fetchJson } from './lib/wait.mjs';
 import { bitcoinCli, bootstrapChain, mine, faucet } from './lib/chain.mjs';
 import { setupArkd } from './lib/setup/arkd.mjs';
 import { setupFulmine, setupDelegator } from './lib/setup/fulmine.mjs';
 import { setupBoltz } from './lib/setup/boltz.mjs';
+import { setupSolver } from './lib/setup/solver.mjs';
 import { createInvoice, payInvoice } from './lib/invoice.mjs';
 
+// Each profile's direct prerequisites. resolveProfiles() expands the transitive
+// closure so the orchestrator can enable every profile a target tier needs.
+const PROFILE_DEPS = {
+  base: [],
+  ark: ['base'],
+  fulmine: ['ark'],
+  boltz: ['fulmine'],
+  emulator: ['ark'],
+  solver: ['ark', 'emulator'],
+};
+
+function resolveProfiles(requested) {
+  const out = new Set();
+  const visit = (p) => {
+    if (out.has(p)) return;
+    if (!(p in PROFILE_DEPS)) {
+      fail(`unknown profile "${p}" (valid: ${Object.keys(PROFILE_DEPS).join(', ')})`);
+    }
+    out.add(p);
+    PROFILE_DEPS[p].forEach(visit);
+  };
+  requested.forEach(visit);
+  return [...out];
+}
+
 function parseArgs(argv) {
-  const opts = { command: argv[0], env: '', clean: false, prune: false, positional: [] };
+  const opts = { command: argv[0], env: '', clean: false, prune: false, profiles: [], positional: [] };
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--env') opts.env = argv[++i];
+    if (a === '--env') opts.env = argv[++i] || fail('--env requires a path');
     else if (a === '--clean') opts.clean = true;
     else if (a === '--prune') opts.prune = true;
+    else if (a === '--profile') {
+      const val = argv[++i] || fail('--profile requires a name');
+      opts.profiles.push(...val.split(',').map((s) => s.trim()).filter(Boolean));
+    }
     else if (a === '--build') { /* legacy no-op: there is no build artifact anymore */ }
     else opts.positional.push(a);
   }
@@ -45,7 +79,7 @@ async function startEmulator() {
   log(`Emulator up at http://localhost:${port} (signerPubkey: ${json?.signerPubkey || '?'})`);
 }
 
-function banner() {
+function banner(active) {
   const lines = [
     '',
     '========================================',
@@ -56,48 +90,76 @@ function banner() {
     `  Mempool / API   http://localhost:${env('MEMPOOL_WEB_PORT', '3000')}  (Esplora REST under /api)`,
     `  Fulcrum         localhost:50001`,
     `  NBXplorer       http://localhost:32838`,
-    `  Arkd            http://localhost:7070   (admin :7071)`,
-    `  Arkd Wallet     http://localhost:6060`,
-    `  Fulmine API     http://localhost:${env('FULMINE_API_PORT', '7003')}`,
-    `  Delegator API   http://localhost:${env('DELEGATOR_API_PORT', '7011')}`,
-    `  Boltz CORS      http://localhost:${env('NGINX_PORT', '9069')}`,
-    `  Boltz gRPC      localhost:${env('BOLTZ_GRPC_PORT', '9000')}`,
-    `  Boltz LND       localhost:${env('BOLTZ_LND_RPC_PORT', '10010')}`,
-    `  Web Wallet      http://localhost:${env('WALLET_PORT', '3003')}`,
   ];
-  if (env('EMULATOR_IMAGE')) {
+  if (active.has('ark')) {
+    lines.push(`  Arkd            http://localhost:7070   (admin :7071)`);
+    lines.push(`  Arkd Wallet     http://localhost:6060`);
+  }
+  if (active.has('fulmine')) {
+    lines.push(`  Fulmine API     http://localhost:${env('FULMINE_API_PORT', '7003')}`);
+    lines.push(`  Delegator API   http://localhost:${env('DELEGATOR_API_PORT', '7011')}`);
+    lines.push(`  Boltz LND       localhost:${env('BOLTZ_LND_RPC_PORT', '10010')}`);
+  }
+  if (active.has('boltz')) {
+    lines.push(`  Boltz CORS      http://localhost:${env('NGINX_PORT', '9069')}`);
+    lines.push(`  Boltz gRPC      localhost:${env('BOLTZ_GRPC_PORT', '9000')}`);
+    lines.push(`  Web Wallet      http://localhost:${env('WALLET_PORT', '3003')}`);
+  }
+  if (active.has('emulator')) {
     lines.push(`  Emulator        http://localhost:${env('EMULATOR_PORT', '7073')}`);
   }
-  lines.push('', `  Arkd password:  ${env('ARKD_PASSWORD', 'secret')}`, '');
+  if (active.has('solver')) {
+    lines.push(`  Solver HTTP     http://localhost:${env('SOLVER_HTTP_PORT', '7091')}`);
+    lines.push(`  Solver gRPC     localhost:${env('SOLVER_GRPC_PORT', '7090')}`);
+  }
+  lines.push(
+    '',
+    `  Active profiles: ${[...active].join(', ')}`,
+    `  Arkd password:   ${env('ARKD_PASSWORD', 'secret')}`,
+    '',
+  );
   console.log(lines.join('\n'));
 }
 
 async function start(opts) {
   if (opts.clean) await clean(opts);
 
-  log('Starting arkade-regtest stack...');
-  const up = composeUp([]);
+  const requested = opts.profiles.length ? opts.profiles : ALL_PROFILES;
+  const active = new Set(resolveProfiles(requested));
+
+  // Emulator opt-out: clearing EMULATOR_IMAGE disables it — and the solver,
+  // which requires the emulator (SOLVER_EMULATOR_URL).
+  if (!env('EMULATOR_IMAGE')) {
+    if (active.delete('emulator')) log('Emulator disabled (EMULATOR_IMAGE empty)');
+    if (active.delete('solver')) warn('Solver needs the emulator; skipping it (EMULATOR_IMAGE is empty)');
+  }
+
+  const profiles = [...active];
+  log(`Starting arkade-regtest stack (profiles: ${profiles.join(', ')})...`);
+  const up = composeUp([], { profiles });
   if (up.code !== 0) fail('docker compose up failed');
 
-  // Chain first: wait for bitcoind RPC, then ensure the node wallet is funded.
+  // base (always in any closure): wait for bitcoind RPC, fund the node wallet,
+  // and wait for the explorer's Esplora API before anything tries to sync.
   await waitForOrFail('Bitcoin Core RPC', () =>
     bitcoinCli(['getblockchaininfo'], { capture: true }).code === 0,
   );
   bootstrapChain();
-
-  // Explorer must serve the Esplora API before arkd/fulmine can sync.
   await waitForOrFail('mempool Esplora API', () =>
     httpOk(`http://localhost:${env('MEMPOOL_WEB_PORT', '3000')}/api/blocks/tip/height`),
     { attempts: 60, intervalMs: 3000 },
   );
 
-  await setupArkd();
-  await setupFulmine();
-  await setupDelegator();
-  await setupBoltz();
-  await startEmulator();
+  if (active.has('ark')) await setupArkd();
+  if (active.has('fulmine')) {
+    await setupFulmine();
+    await setupDelegator();
+  }
+  if (active.has('boltz')) await setupBoltz();
+  if (active.has('emulator')) await startEmulator();
+  if (active.has('solver')) await setupSolver();
 
-  banner();
+  banner(active);
 }
 
 async function stop() {

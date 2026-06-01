@@ -15,6 +15,7 @@ services:
   bitcoin:
     image: ${BITCOIN_IMAGE:-ghcr.io/getumbrel/docker-bitcoind:v30.0}
     container_name: bitcoin
+    profiles: ["base"]
     restart: on-failure
     stop_grace_period: 30s
     volumes:
@@ -30,6 +31,7 @@ services:
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:16}
     container_name: postgres
+    profiles: ["base"]
     restart: unless-stopped
     environment:
       POSTGRES_HOST_AUTH_METHOD: trust
@@ -47,6 +49,7 @@ services:
   nbxplorer:
     image: ${NBXPLORER_IMAGE:-nicolasdorier/nbxplorer:2.6.0}
     container_name: nbxplorer
+    profiles: ["base"]
     restart: unless-stopped
     depends_on:
       postgres:
@@ -76,6 +79,7 @@ services:
   fulcrum:
     image: ${FULCRUM_IMAGE:-cculianu/fulcrum:latest}
     container_name: fulcrum
+    profiles: ["base"]
     restart: on-failure
     stop_grace_period: 30s
     depends_on:
@@ -99,6 +103,7 @@ services:
   mempool_mariadb:
     image: ${MARIADB_IMAGE:-mariadb:10.5}
     container_name: mempool_mariadb
+    profiles: ["base"]
     restart: on-failure
     stop_grace_period: 1m
     environment:
@@ -112,6 +117,7 @@ services:
   mempool_api:
     image: ${MEMPOOL_BACKEND_IMAGE:-mempool/backend:v3.3.1}
     container_name: mempool_api
+    profiles: ["base"]
     user: "1000:1000"
     init: true
     restart: on-failure
@@ -157,6 +163,7 @@ services:
   mempool_web:
     image: ${MEMPOOL_FRONTEND_IMAGE:-mempool/frontend:v3.3.1}
     container_name: mempool_web
+    profiles: ["base"]
     user: "1000:1000"
     init: true
     restart: on-failure
@@ -174,6 +181,7 @@ services:
   lnd:
     image: ${LND_IMAGE:-lightninglabs/lnd:v0.19.3-beta}
     container_name: lnd
+    profiles: ["base"]
     restart: unless-stopped
     stop_grace_period: 5m30s
     depends_on:
