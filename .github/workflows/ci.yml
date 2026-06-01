@@ -1,0 +1,76 @@
+name: ci
+
+# Self-test: boot the whole regtest stack on a clean Linux runner and assert the
+# key services come up, then tear it down. Proves the environment works
+# cross-platform (the orchestrator is also developed on Windows/macOS).
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Start regtest environment
+        run: node regtest.mjs start
+
+      - name: Verify services
+        run: |
+          set -euo pipefail
+
+          echo "== arkd =="
+          curl -sf http://localhost:7070/v1/info | jq -e '.pubkey != null'
+
+          echo "== mempool Esplora API (regtest) =="
+          test "$(curl -sf http://localhost:3000/api/blocks/tip/height)" -ge 0
+
+          echo "== Fulmine wallet =="
+          curl -sf http://localhost:7003/api/v1/wallet/status | jq -e '.initialized == true'
+
+          echo "== Delegator wallet =="
+          curl -sf http://localhost:7011/api/v1/wallet/status | jq -e '.initialized == true'
+
+          echo "== Boltz ARK/BTC pairs =="
+          curl -sf http://localhost:9069/v2/swap/submarine | grep -q '"ARK"'
+
+          echo "== Emulator =="
+          curl -sf http://localhost:7073/v1/info | jq -e '.signerPubkey != null'
+
+      - name: Exercise the mine helper
+        run: |
+          set -euo pipefail
+          before=$(curl -sf http://localhost:3000/api/blocks/tip/height)
+          node regtest.mjs mine 3
+          # mempool polls bitcoind on an interval, so allow a few seconds for it
+          # to index the new blocks before asserting the tip advanced.
+          for i in $(seq 1 15); do
+            after=$(curl -sf http://localhost:3000/api/blocks/tip/height)
+            if [ "$after" -ge "$((before + 3))" ]; then echo "tip $before -> $after"; exit 0; fi
+            sleep 2
+          done
+          echo "tip did not advance ($before -> ${after:-?})"; exit 1
+
+      - name: Dump diagnostics on failure
+        if: failure()
+        run: |
+          docker compose -f docker/compose.base.yml -f docker/compose.ark.yml ps || true
+          for c in bitcoin fulcrum mempool_api mempool_web nbxplorer arkd-wallet arkd boltz boltz-lnd boltz-fulmine; do
+            echo "===== logs: $c ====="
+            docker logs --tail 80 "$c" 2>&1 || true
+          done
+
+      - name: Cleanup
+        if: always()
+        run: node regtest.mjs clean
