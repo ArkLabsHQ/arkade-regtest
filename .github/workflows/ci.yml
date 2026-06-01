@@ -42,7 +42,9 @@ jobs:
           echo "== Delegator wallet =="
           curl -sf http://localhost:7011/api/v1/wallet/status | jq -e '.initialized == true'
 
-          echo "== Boltz ARK/BTC pairs =="
+          echo "== Boltz ARK/BTC pairs (direct API) =="
+          curl -sf http://localhost:9001/v2/swap/submarine | grep -q '"ARK"'
+          echo "== Boltz CORS proxy (nginx) =="
           curl -sf http://localhost:9069/v2/swap/submarine | grep -q '"ARK"'
 
           echo "== Emulator =="
