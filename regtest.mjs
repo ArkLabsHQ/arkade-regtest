@@ -188,9 +188,19 @@ async function clean(opts) {
 }
 
 async function main() {
-  const opts = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+
+  // `ark` / `arkd` are raw passthroughs into the arkd container, so forward
+  // every following token verbatim (flags included) without our own parsing.
+  if (argv[0] === 'ark' || argv[0] === 'arkd') {
+    const res = docker(['exec', 'arkd', ...argv]); // argv[0] is the binary name in the container
+    process.exitCode = res.code;
+    return;
+  }
+
+  const opts = parseArgs(argv);
   if (!opts.command) {
-    fail('usage: node regtest.mjs <start|stop|clean|faucet|mine> [options]');
+    fail('usage: node regtest.mjs <start|stop|clean|faucet|mine|ark|arkd> [options]');
   }
 
   // faucet/mine act on a running node and don't need override discovery, but

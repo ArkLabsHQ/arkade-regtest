@@ -39,7 +39,11 @@ node regtest.mjs faucet <address> <amountBtc>   # send on-chain coins + confirm
 node regtest.mjs mine [n]                        # mine n blocks (default 1)
 node regtest.mjs create-invoice [--secondary]    # 100k-sat invoice (boltz-lnd, or lnd)
 node regtest.mjs pay-invoice <invoice>           # pay from the non-destination node
+node regtest.mjs ark <args...>                   # ark client CLI, run inside the arkd container
+node regtest.mjs arkd <args...>                  # arkd server CLI, run inside the arkd container
 ```
+
+`start` initializes the `ark` client (pointed at the local arkd + mempool explorer) and seeds it with offchain funds, so commands like `node regtest.mjs ark balance` / `ark receive` / `ark send …` work out of the box. The `arkd` passthrough exposes the server CLI (e.g. `node regtest.mjs arkd note --amount 100000000`).
 
 > **Block production is explicit.** Unlike the old nigiri/chopsticks setup, there is no background auto-miner: regtest produces blocks only when you mine. The `start` flow mines at each funding step, and `faucet` confirms its own transaction. If a test broadcasts a transaction and waits for a confirmation, it must call `node regtest.mjs mine`.
 

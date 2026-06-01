@@ -57,6 +57,9 @@ jobs:
           echo "== Arkade explorer =="
           curl -sf http://localhost:7080/ -o /dev/null
 
+          echo "== ark client CLI (initialized + funded) =="
+          docker exec arkd ark balance | jq -e '.offchain_balance.total > 0'
+
       - name: Exercise the mine helper
         run: |
           set -euo pipefail
