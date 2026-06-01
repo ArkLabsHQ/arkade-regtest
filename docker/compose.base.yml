@@ -13,7 +13,7 @@ name: arkade-regtest
 services:
   # ── Bitcoin Core (regtest) ─────────────────────────────────────────────────
   bitcoin:
-    image: ${BITCOIN_IMAGE:-btcpayserver/bitcoin:31.0}
+    image: ${BITCOIN_IMAGE:-btcpayserver/bitcoin:30.2}
     container_name: bitcoin
     profiles: ["base"]
     restart: on-failure
