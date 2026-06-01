@@ -36,11 +36,13 @@ jobs:
           echo "== mempool Esplora API (regtest) =="
           test "$(curl -sf http://localhost:3000/api/blocks/tip/height)" -ge 0
 
-          echo "== Fulmine wallet =="
+          echo "== Fulmine wallet (initialized + funded) =="
           curl -sf http://localhost:7003/api/v1/wallet/status | jq -e '.initialized == true'
+          curl -sf http://localhost:7003/api/v1/balance | jq -e '(.amount | tonumber) > 0'
 
-          echo "== Delegator wallet =="
+          echo "== Delegator wallet (initialized + funded) =="
           curl -sf http://localhost:7011/api/v1/wallet/status | jq -e '.initialized == true'
+          curl -sf http://localhost:7011/api/v1/balance | jq -e '(.amount | tonumber) > 0'
 
           echo "== Boltz ARK/BTC pairs (direct API) =="
           curl -sf http://localhost:9001/v2/swap/submarine | grep -q '"ARK"'

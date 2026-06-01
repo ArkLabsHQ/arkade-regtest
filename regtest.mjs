@@ -20,7 +20,7 @@ import { ROOT, composeUp, composeStop, composeDown, ALL_PROFILES } from './lib/c
 import { docker } from './lib/proc.mjs';
 import { sleep, waitForOrFail, httpOk, fetchJson } from './lib/wait.mjs';
 import { bitcoinCli, bootstrapChain, mine, faucet } from './lib/chain.mjs';
-import { setupArkd } from './lib/setup/arkd.mjs';
+import { setupArkd, applyArkdFees } from './lib/setup/arkd.mjs';
 import { setupFulmine, setupDelegator } from './lib/setup/fulmine.mjs';
 import { setupBoltz } from './lib/setup/boltz.mjs';
 import { setupSolver } from './lib/setup/solver.mjs';
@@ -166,6 +166,9 @@ async function start(opts) {
   }
   if (active.has('emulator')) await startEmulator();
   if (active.has('solver')) await setupSolver();
+  // Apply the configured arkd intent fees last — every wallet above settles/
+  // redeems with fees zeroed, so this must run after all of them.
+  if (active.has('ark')) await applyArkdFees();
 
   banner(active);
 }
