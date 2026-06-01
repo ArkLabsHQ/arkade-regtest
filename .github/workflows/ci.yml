@@ -31,7 +31,7 @@ jobs:
           set -euo pipefail
 
           echo "== arkd =="
-          curl -sf http://localhost:7070/v1/info | jq -e '.pubkey != null'
+          curl -sf http://localhost:7070/v1/info | jq -e '.signerPubkey != null'
 
           echo "== mempool Esplora API (regtest) =="
           test "$(curl -sf http://localhost:3000/api/blocks/tip/height)" -ge 0
