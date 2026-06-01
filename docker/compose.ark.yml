@@ -75,7 +75,7 @@ services:
     image: ${BOLTZ_LND_IMAGE:-btcpayserver/lnd:v0.19.3-beta}
     restart: unless-stopped
     container_name: boltz-lnd
-    profiles: ["fulmine"]
+    profiles: ["boltz"]
     environment:
       LND_CHAIN: 'btc'
       LND_ENVIRONMENT: 'regtest'
@@ -119,7 +119,7 @@ services:
   boltz-fulmine:
     image: ${FULMINE_IMAGE:-ghcr.io/arklabshq/fulmine:v0.3.23}
     container_name: boltz-fulmine
-    profiles: ["fulmine"]
+    profiles: ["boltz"]
     environment:
       - FULMINE_ARK_SERVER=http://arkd:7070
       - FULMINE_ESPLORA_URL=http://mempool_web/api
@@ -316,7 +316,7 @@ services:
   arkade-wallet:
     image: ${WALLET_IMAGE:-ghcr.io/arkade-os/wallet:latest}
     container_name: arkade-wallet
-    profiles: ["boltz"]
+    profiles: ["ark"]
     ports:
       - '${WALLET_PORT:-3003}:80'
     environment:
@@ -326,6 +326,23 @@ services:
       - VITE_DELEGATOR_URL=http://localhost:${DELEGATOR_HTTP_PORT:-7012}
       - VITE_LNURL_SERVER_URL=http://localhost:${LNURL_PORT:-9090}
     restart: unless-stopped
+
+  # ── Arkade explorer (static web UI, repointed at the local arkd) ───────────
+  arkade-explorer:
+    image: ${EXPLORER_IMAGE:-ghcr.io/arklabshq/arkade-explorer:latest}
+    container_name: arkade-explorer
+    profiles: ["ark"]
+    restart: unless-stopped
+    depends_on:
+      - arkd
+    command:
+      - sh
+      - -c
+      - |
+        sed -i 's|https://arkade.computer|http://localhost:7070|g' /usr/share/nginx/html/assets/*.js &&
+        nginx -g 'daemon off;'
+    ports:
+      - '${EXPLORER_PORT:-7080}:80'
 
   # ── Emulator (arkade-script signing service) — profile-gated, started last ──
   emulator:

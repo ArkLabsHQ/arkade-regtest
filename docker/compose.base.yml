@@ -13,14 +13,34 @@ name: arkade-regtest
 services:
   # ── Bitcoin Core (regtest) ─────────────────────────────────────────────────
   bitcoin:
-    image: ${BITCOIN_IMAGE:-ghcr.io/getumbrel/docker-bitcoind:v30.0}
+    image: ${BITCOIN_IMAGE:-btcpayserver/bitcoin:31.0}
     container_name: bitcoin
     profiles: ["base"]
     restart: on-failure
     stop_grace_period: 30s
+    environment:
+      # The BTCPay image builds bitcoin.conf from BITCOIN_NETWORK (which creates
+      # the [regtest] section) + BITCOIN_EXTRA_ARGS appended under it. It only
+      # sets rpcallowip=::/0 and no rpcbind, so we add rpcbind=0.0.0.0 +
+      # rpcallowip=0.0.0.0/0 for inter-container RPC. Low-fee is baked in here so
+      # the orchestrator never has to rewrite the conf and restart bitcoind.
+      BITCOIN_NETWORK: regtest
+      BITCOIN_EXTRA_ARGS: |
+        rpcbind=0.0.0.0
+        rpcallowip=0.0.0.0/0
+        rpcuser=admin1
+        rpcpassword=123
+        txindex=1
+        fallbackfee=0.00001
+        minrelaytxfee=0
+        mintxfee=0
+        blockmintxfee=0
+        zmqpubrawblock=tcp://0.0.0.0:28332
+        zmqpubrawtx=tcp://0.0.0.0:28333
+        blockfilterindex=1
+        peerblockfilters=1
     volumes:
-      - bitcoin_datadir:/data/.bitcoin
-      - ./conf/bitcoin.conf:/data/.bitcoin/bitcoin.conf:ro
+      - bitcoin_datadir:/data
     ports:
       - 18443:18443
       - 18444:18444
@@ -96,8 +116,11 @@ services:
       - "123"
       - --tcp
       - 0.0.0.0:50001
+      - --ws
+      - 0.0.0.0:50003
     ports:
       - "50001:50001"
+      - "50003:50003"
 
   # ── mempool: MariaDB + backend API + web frontend ──────────────────────────
   mempool_mariadb:
@@ -179,24 +202,47 @@ services:
 
   # ── Counterparty Lightning node (boltz-lnd opens a channel to this) ────────
   lnd:
-    image: ${LND_IMAGE:-lightninglabs/lnd:v0.19.3-beta}
+    image: ${LND_IMAGE:-btcpayserver/lnd:v0.19.3-beta}
     container_name: lnd
     profiles: ["base"]
     restart: unless-stopped
     stop_grace_period: 5m30s
     depends_on:
       - bitcoin
+    # BTCPay's LND image builds lnd.conf from LND_CHAIN/LND_ENVIRONMENT +
+    # LND_EXTRA_ARGS and auto-creates/unlocks the wallet — no bind-mounted conf,
+    # no manual unlock, and lncli uses the default /root/.lnd path (so no
+    # --lnddir needed, unlike the upstream lightninglabs image).
     environment:
-      HOME: /data
-    command:
-      - --lnddir=/data/.lnd
+      LND_CHAIN: "btc"
+      LND_ENVIRONMENT: "regtest"
+      # BTCPay's initunlock wrapper curls this URL over http to auto-create/unlock
+      # the wallet, so it must match restlisten + no-rest-tls (same pattern as
+      # boltz-lnd). Binding REST to the container hostname is accepted with
+      # no-rest-tls; binding to 0.0.0.0 would make lnd refuse to start.
+      LND_REST_LISTEN_HOST: http://lnd:8080
+      LND_EXTRA_ARGS: |
+        bitcoin.node=bitcoind
+        bitcoind.rpchost=bitcoin:18443
+        bitcoind.rpcuser=admin1
+        bitcoind.rpcpass=123
+        bitcoind.zmqpubrawblock=tcp://bitcoin:28332
+        bitcoind.zmqpubrawtx=tcp://bitcoin:28333
+        rpclisten=0.0.0.0:10009
+        restlisten=lnd:8080
+        alias=arkade-counterparty
+        accept-keysend=true
+        protocol.wumbo-channels=true
+        minchansize=25000
+        no-rest-tls=1
+        restcors=*
+        tlsextradomain=lnd
+        debuglevel=debug
     volumes:
-      - lnd_datadir:/data/.lnd
-      - ./conf/lnd.conf:/data/.lnd/lnd.conf:ro
+      - lnd_datadir:/data
     ports:
       - "9735:9735"
       - "10009:10009"
-      - "18080:18080"
 
 volumes:
   bitcoin_datadir:

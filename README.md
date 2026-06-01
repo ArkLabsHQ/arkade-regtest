@@ -49,29 +49,31 @@ Two compose files are merged into one project (`arkade-regtest`):
 arkd and Fulmine consume the **Esplora-compatible REST API that mempool serves under `/api`**
 (`http://mempool_web/api` inside the network) — an officially supported arkd explorer backend.
 
-Configuration files for the chain and counterparty LND node live in `docker/conf/`.
+Bitcoin Core and the counterparty LND node use the BTCPay images, so their configuration is embedded directly via `BITCOIN_EXTRA_ARGS` / `LND_EXTRA_ARGS` in `compose.base.yml` — there are no bind-mounted conf files.
 
 ## Profiles
 
 Services are grouped into compose profiles so you can bring up just the tier you need. The CLI resolves the dependency closure automatically:
 
-| Profile    | Services                                                        | Depends on        |
-| ---------- | --------------------------------------------------------------- | ----------------- |
-| `base`     | bitcoin, postgres, nbxplorer, fulcrum, mempool (api/web/db), lnd | —                 |
-| `ark`      | arkd, arkd-wallet                                               | `base`            |
-| `fulmine`  | boltz-fulmine, fulmine-delegator, boltz-lnd                    | `ark`             |
-| `boltz`    | boltz, nginx-boltz, lnurl-server, arkade-wallet                | `fulmine`         |
-| `emulator` | emulator                                                        | `ark`             |
-| `solver`   | solver                                                          | `ark`, `emulator` |
+| Profile    | Services                                                          | Depends on        |
+| ---------- | ----------------------------------------------------------------- | ----------------- |
+| `base`     | bitcoin, postgres, nbxplorer, fulcrum, mempool (api/web/db), lnd  | —                 |
+| `ark`      | arkd, arkd-wallet, arkade-wallet, arkade-explorer                 | `base`            |
+| `fulmine`  | fulmine-delegator                                                 | `ark`             |
+| `boltz`    | boltz, boltz-fulmine, boltz-lnd, nginx-boltz, lnurl-server        | `ark`             |
+| `emulator` | emulator                                                          | `ark`             |
+| `solver`   | solver                                                            | `ark`, `emulator` |
 
 ```bash
 node regtest.mjs start                      # full stack (all profiles)
-node regtest.mjs start --profile base       # just the chain + explorer
-node regtest.mjs start --profile ark        # base + ark
-node regtest.mjs start --profile boltz      # base + ark + fulmine + boltz
+node regtest.mjs start --profile base       # just the chain + explorer/indexer
+node regtest.mjs start --profile ark        # base + ark (incl. web wallet + explorer)
+node regtest.mjs start --profile boltz      # base + ark + boltz (incl. boltz-fulmine)
 node regtest.mjs start --profile solver     # base + ark + emulator + solver
 node regtest.mjs start --profile emulator --profile boltz   # combine targets
 ```
+
+You can also pin profiles via the `REGTEST_PROFILES` env var (comma-separated, e.g. in `.env.regtest`) instead of passing `--profile`. Precedence: `--profile` flags > `REGTEST_PROFILES` > full stack.
 
 `stop` and `clean` always act on the whole project regardless of profiles.
 
@@ -109,7 +111,7 @@ EMULATOR_IMAGE=
 | Bitcoin Core RPC   | `localhost:18443` (admin1 / 123)       | 18443        |
 | Mempool explorer   | `http://localhost:3000`                | 3000         |
 | Esplora REST API   | `http://localhost:3000/api`            | 3000         |
-| Fulcrum (Electrum) | `localhost:50001`                      | 50001        |
+| Fulcrum (Electrum) | `localhost:50001` (TCP), `localhost:50003` (WS) | 50001 / 50003 |
 | NBXplorer          | `http://localhost:32838`               | 32838        |
 | Arkd               | `http://localhost:7070` (admin `7071`) | 7070         |
 | Arkd Wallet        | `http://localhost:6060`                | 6060         |
@@ -119,6 +121,7 @@ EMULATOR_IMAGE=
 | Boltz gRPC         | `localhost:9000`                       | 9000         |
 | Boltz LND RPC      | `localhost:10010`                      | 10010        |
 | Web wallet         | `http://localhost:3003`                | 3003         |
+| Arkade explorer    | `http://localhost:7080`                | 7080         |
 | Emulator           | `http://localhost:7073`                | 7073         |
 | Solver HTTP        | `http://localhost:7091`                | 7091         |
 | Solver gRPC        | `localhost:7090`                       | 7090         |

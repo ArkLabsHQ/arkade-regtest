@@ -8,8 +8,10 @@
 //   node regtest.mjs mine [n]
 //
 // Profiles (and their dependencies) let you bring up a subset of the stack:
-//   base → ark → fulmine → boltz,  emulator → ark,  solver → ark + emulator.
-// `--profile boltz` brings up base+ark+fulmine+boltz; no --profile = full stack.
+//   ark → base,  fulmine → ark,  boltz → ark,  emulator → ark,
+//   solver → ark + emulator. `--profile boltz` brings up base+ark+boltz.
+//   Selection precedence: --profile flags > REGTEST_PROFILES env (comma-list)
+//   > full stack.
 //
 // Replaces the old bash scripts + the nigiri binary entirely.
 import { loadEnv, env } from './lib/env.mjs';
@@ -29,8 +31,8 @@ import { createInvoice, payInvoice } from './lib/invoice.mjs';
 const PROFILE_DEPS = {
   base: [],
   ark: ['base'],
-  fulmine: ['ark'],
-  boltz: ['fulmine'],
+  fulmine: ['ark'], // standalone fulmine-delegator
+  boltz: ['ark'], // boltz + its own boltz-fulmine + boltz-lnd (independent of the delegator)
   emulator: ['ark'],
   solver: ['ark', 'emulator'],
 };
@@ -94,16 +96,17 @@ function banner(active) {
   if (active.has('ark')) {
     lines.push(`  Arkd            http://localhost:7070   (admin :7071)`);
     lines.push(`  Arkd Wallet     http://localhost:6060`);
+    lines.push(`  Web Wallet      http://localhost:${env('WALLET_PORT', '3003')}`);
+    lines.push(`  Explorer        http://localhost:${env('EXPLORER_PORT', '7080')}`);
   }
   if (active.has('fulmine')) {
-    lines.push(`  Fulmine API     http://localhost:${env('FULMINE_API_PORT', '7003')}`);
     lines.push(`  Delegator API   http://localhost:${env('DELEGATOR_API_PORT', '7011')}`);
-    lines.push(`  Boltz LND       localhost:${env('BOLTZ_LND_RPC_PORT', '10010')}`);
   }
   if (active.has('boltz')) {
+    lines.push(`  Fulmine API     http://localhost:${env('FULMINE_API_PORT', '7003')}`);
+    lines.push(`  Boltz LND       localhost:${env('BOLTZ_LND_RPC_PORT', '10010')}`);
     lines.push(`  Boltz CORS      http://localhost:${env('NGINX_PORT', '9069')}`);
     lines.push(`  Boltz gRPC      localhost:${env('BOLTZ_GRPC_PORT', '9000')}`);
-    lines.push(`  Web Wallet      http://localhost:${env('WALLET_PORT', '3003')}`);
   }
   if (active.has('emulator')) {
     lines.push(`  Emulator        http://localhost:${env('EMULATOR_PORT', '7073')}`);
@@ -124,7 +127,12 @@ function banner(active) {
 async function start(opts) {
   if (opts.clean) await clean(opts);
 
-  const requested = opts.profiles.length ? opts.profiles : ALL_PROFILES;
+  // Profile selection precedence: --profile flags > REGTEST_PROFILES env > all.
+  const fromEnv = env('REGTEST_PROFILES')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const requested = opts.profiles.length ? opts.profiles : fromEnv.length ? fromEnv : ALL_PROFILES;
   const active = new Set(resolveProfiles(requested));
 
   // Emulator opt-out: clearing EMULATOR_IMAGE disables it — and the solver,
@@ -144,18 +152,18 @@ async function start(opts) {
   await waitForOrFail('Bitcoin Core RPC', () =>
     bitcoinCli(['getblockchaininfo'], { capture: true }).code === 0,
   );
-  bootstrapChain();
+  await bootstrapChain();
   await waitForOrFail('mempool Esplora API', () =>
     httpOk(`http://localhost:${env('MEMPOOL_WEB_PORT', '3000')}/api/blocks/tip/height`),
     { attempts: 60, intervalMs: 3000 },
   );
 
   if (active.has('ark')) await setupArkd();
-  if (active.has('fulmine')) {
-    await setupFulmine();
-    await setupDelegator();
+  if (active.has('fulmine')) await setupDelegator();
+  if (active.has('boltz')) {
+    await setupFulmine(); // boltz-fulmine lives in the boltz profile
+    await setupBoltz();
   }
-  if (active.has('boltz')) await setupBoltz();
   if (active.has('emulator')) await startEmulator();
   if (active.has('solver')) await setupSolver();
 
