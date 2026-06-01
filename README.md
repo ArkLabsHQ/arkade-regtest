@@ -35,8 +35,9 @@ Use **`node regtest.mjs`** for the argument-taking commands below (npm would nee
 ### Other commands
 
 ```bash
-node regtest.mjs faucet <address> <amountBtc>   # send on-chain coins + confirm
+node regtest.mjs faucet <address> <amountBtc> [--confirm]   # send from the node wallet; --confirm mines 1
 node regtest.mjs mine [n]                        # mine n blocks (default 1)
+node regtest.mjs reorg [depth]                   # simulate a reorg of `depth` blocks (default 1)
 node regtest.mjs create-invoice [--secondary]    # 100k-sat invoice (boltz-lnd, or lnd)
 node regtest.mjs pay-invoice <invoice>           # pay from the non-destination node
 node regtest.mjs ark <args...>                   # ark client CLI, run inside the arkd container
@@ -45,7 +46,7 @@ node regtest.mjs arkd <args...>                  # arkd server CLI, run inside t
 
 `start` initializes the `ark` client (pointed at the local arkd + mempool explorer) and seeds it with offchain funds, so commands like `node regtest.mjs ark balance` / `ark receive` / `ark send …` work out of the box. The `arkd` passthrough exposes the server CLI (e.g. `node regtest.mjs arkd note --amount 100000000`).
 
-> **Block production is explicit.** Unlike the old nigiri/chopsticks setup, there is no background auto-miner: regtest produces blocks only when you mine. The `start` flow mines at each funding step, and `faucet` confirms its own transaction. If a test broadcasts a transaction and waits for a confirmation, it must call `node regtest.mjs mine`.
+> **Block production.** A built-in auto-miner mines one block every `AUTOMINE_INTERVAL` seconds (default **600 / 10 min**); set `AUTOMINE_INTERVAL=0` to disable it and mine only explicitly. `faucet` spends from the node wallet's balance and does **not** confirm by default — pass `--confirm` to mine a block immediately, or rely on the auto-miner / an explicit `node regtest.mjs mine`. The `start` flow mines explicitly where it needs confirmed funds, so a fresh start is deterministic regardless of the auto-miner.
 
 ## Architecture
 

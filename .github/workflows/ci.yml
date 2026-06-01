@@ -76,6 +76,16 @@ jobs:
           done
           echo "tip did not advance ($before -> ${after:-?})"; exit 1
 
+      - name: Exercise the reorg helper
+        run: |
+          set -euo pipefail
+          before=$(docker exec bitcoin bitcoin-cli -regtest -rpcuser=admin1 -rpcpassword=123 getblockcount)
+          node regtest.mjs reorg 2
+          after=$(docker exec bitcoin bitcoin-cli -regtest -rpcuser=admin1 -rpcpassword=123 getblockcount)
+          # reorg 2 invalidates 2 blocks and mines 3, so the tip advances by 1.
+          test "$after" -gt "$before"
+          echo "reorg 2: height $before -> $after"
+
       - name: Dump diagnostics on failure
         if: failure()
         run: |

@@ -19,7 +19,7 @@ import { log, warn, fail } from './lib/log.mjs';
 import { ROOT, composeUp, composeStop, composeDown, ALL_PROFILES } from './lib/compose.mjs';
 import { docker } from './lib/proc.mjs';
 import { sleep, waitForOrFail, httpOk, fetchJson } from './lib/wait.mjs';
-import { bitcoinCli, bootstrapChain, mine, faucet } from './lib/chain.mjs';
+import { bitcoinCli, bootstrapChain, mine, faucet, reorg } from './lib/chain.mjs';
 import { setupArkd, applyArkdFees } from './lib/setup/arkd.mjs';
 import { setupFulmine, setupDelegator } from './lib/setup/fulmine.mjs';
 import { setupBoltz } from './lib/setup/boltz.mjs';
@@ -52,12 +52,13 @@ function resolveProfiles(requested) {
 }
 
 function parseArgs(argv) {
-  const opts = { command: argv[0], env: '', clean: false, prune: false, profiles: [], positional: [] };
+  const opts = { command: argv[0], env: '', clean: false, prune: false, confirm: false, profiles: [], positional: [] };
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--env') opts.env = argv[++i] || fail('--env requires a path');
     else if (a === '--clean') opts.clean = true;
     else if (a === '--prune') opts.prune = true;
+    else if (a === '--confirm') opts.confirm = true;
     else if (a === '--profile') {
       const val = argv[++i] || fail('--profile requires a name');
       opts.profiles.push(...val.split(',').map((s) => s.trim()).filter(Boolean));
@@ -203,7 +204,7 @@ async function main() {
 
   const opts = parseArgs(argv);
   if (!opts.command) {
-    fail('usage: node regtest.mjs <start|stop|clean|faucet|mine|ark|arkd> [options]');
+    fail('usage: node regtest.mjs <start|stop|clean|faucet|mine|reorg|ark|arkd> [options]');
   }
 
   // faucet/mine act on a running node and don't need override discovery, but
@@ -222,15 +223,22 @@ async function main() {
       break;
     case 'faucet': {
       const [address, amount] = opts.positional;
-      if (!address || !amount) fail('usage: node regtest.mjs faucet <address> <amountBtc>');
-      if (!faucet(address, amount)) fail('faucet failed');
-      log(`Sent ${amount} BTC to ${address} and mined 1 block`);
+      if (!address || !amount) fail('usage: node regtest.mjs faucet <address> <amountBtc> [--confirm]');
+      if (!faucet(address, amount, { confirm: opts.confirm })) fail('faucet failed');
+      log(`Sent ${amount} BTC to ${address}${opts.confirm ? ' and mined 1 block' : ' (unconfirmed; mine to confirm)'}`);
       break;
     }
     case 'mine': {
       const n = parseInt(opts.positional[0] || '1', 10);
       if (!mine(n)) fail('mine failed');
       log(`Mined ${n} block(s)`);
+      break;
+    }
+    case 'reorg': {
+      const depth = parseInt(opts.positional[0] || '1', 10);
+      if (!Number.isFinite(depth) || depth < 1) fail('usage: node regtest.mjs reorg [depth>=1]');
+      if (!reorg(depth)) fail('reorg failed');
+      log(`Reorged ${depth} block(s)`);
       break;
     }
     case 'create-invoice':

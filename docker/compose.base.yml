@@ -47,6 +47,34 @@ services:
       - 28332:28332
       - 28333:28333
 
+  # ── Auto-miner — mines 1 block every AUTOMINE_INTERVAL seconds ──────────────
+  # On by default (600s / 10 min); set AUTOMINE_INTERVAL=0 to disable. Mines via
+  # the bitcoin node's wallet over RPC. The first tick is one full interval away,
+  # so the (faster) start bootstrap stays deterministic.
+  bitcoin-miner:
+    image: ${BITCOIN_IMAGE:-btcpayserver/bitcoin:31.0}
+    container_name: bitcoin-miner
+    profiles: ["base"]
+    restart: unless-stopped
+    depends_on:
+      - bitcoin
+    environment:
+      AUTOMINE_INTERVAL: ${AUTOMINE_INTERVAL:-600}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        if [ -z "$$AUTOMINE_INTERVAL" ] || [ "$$AUTOMINE_INTERVAL" = "0" ]; then
+          echo "auto-miner disabled (AUTOMINE_INTERVAL=$$AUTOMINE_INTERVAL)"
+          exec sleep infinity
+        fi
+        echo "auto-miner: mining 1 block every $${AUTOMINE_INTERVAL}s"
+        while true; do
+          sleep "$$AUTOMINE_INTERVAL"
+          bitcoin-cli -regtest -rpcconnect=bitcoin -rpcuser=admin1 -rpcpassword=123 -generate 1 >/dev/null 2>&1 \
+            && echo "auto-miner: mined a block" || echo "auto-miner: skipped (node/wallet not ready)"
+        done
+
   # ── Postgres (shared: nbxplorer + boltz each create their own database) ─────
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:16}
