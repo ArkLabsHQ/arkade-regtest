@@ -22,7 +22,15 @@ node regtest.mjs stop
 node regtest.mjs clean
 ```
 
-`package.json` also exposes `npm start` / `npm stop` / `npm run clean` as aliases.
+The lifecycle commands have npm aliases too, so from inside this repo you can use either form:
+
+```bash
+npm start        # = node regtest.mjs start
+npm stop         # = node regtest.mjs stop
+npm run clean    # = node regtest.mjs clean
+```
+
+Use **`node regtest.mjs`** for the argument-taking commands below (npm would need the awkward `npm run … -- <args>` form), and whenever this repo is embedded as a submodule (`node regtest/regtest.mjs start`).
 
 ### Other commands
 
