@@ -38,6 +38,7 @@ Use **`node regtest.mjs`** for the argument-taking commands below (npm would nee
 node regtest.mjs faucet <address> <amountBtc> [--confirm]   # send from the node wallet; --confirm mines 1
 node regtest.mjs mine [n]                        # mine n blocks (default 1)
 node regtest.mjs reorg [depth]                   # simulate a reorg of `depth` blocks (default 1)
+node regtest.mjs rpc <args...>                   # bitcoin-cli passthrough (replaces `nigiri rpc`)
 node regtest.mjs create-invoice [--secondary]    # 100k-sat invoice (boltz-lnd, or lnd)
 node regtest.mjs pay-invoice <invoice>           # pay from the non-destination node
 node regtest.mjs ark <args...>                   # ark client CLI, run inside the arkd container
@@ -99,6 +100,10 @@ All defaults live in `.env.defaults`. Overrides are discovered in this priority 
 3. `.env` (local override in arkade-regtest itself)
 
 Variables in the override file replace their `.env.defaults` counterparts; unspecified variables keep their defaults. A variable already set in your shell environment wins over the files.
+
+### Host ports
+
+Every host-exposed port is configurable via `${VAR:-default}` so you can avoid local collisions or run multiple stacks side by side — only the host side is remapped; container-internal ports stay fixed. Base layer: `BITCOIN_RPC_PORT` (18443), `BITCOIN_P2P_PORT` (18444), `BITCOIN_ZMQ_BLOCK_PORT` (28332), `BITCOIN_ZMQ_TX_PORT` (28333), `NBXPLORER_PORT` (32838), `FULCRUM_TCP_PORT` (50001), `FULCRUM_WS_PORT` (50003), `LND_P2P_PORT` (9735), `LND_RPC_PORT` (10009), `MEMPOOL_WEB_PORT` (3000). Ark layer: `ARKD_PORT` (7070), `ARKD_ADMIN_PORT` (7071), `ARKD_WALLET_PORT` (6060), plus the existing Fulmine/Boltz/solver port vars. The CLI reads `ARKD_PORT`/`ARKD_ADMIN_PORT` itself, so overriding them keeps `start`'s arkd setup pointed at the right host ports.
 
 ### Custom arkd version
 

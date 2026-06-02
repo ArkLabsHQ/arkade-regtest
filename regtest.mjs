@@ -6,6 +6,7 @@
 //   node regtest.mjs clean [--prune]
 //   node regtest.mjs faucet <address> <amountBtc>
 //   node regtest.mjs mine [n]
+//   node regtest.mjs rpc <args...>     (bitcoin-cli passthrough, in the bitcoin container)
 //
 // Profiles (and their dependencies) let you bring up a subset of the stack:
 //   ark → base,  delegate → ark,  boltz → ark,  emulator → ark,
@@ -89,14 +90,14 @@ function banner(active) {
     ' Regtest environment ready',
     '========================================',
     '',
-    `  Bitcoin RPC     http://localhost:18443  (admin1 / 123)`,
+    `  Bitcoin RPC     http://localhost:${env('BITCOIN_RPC_PORT', '18443')}  (admin1 / 123)`,
     `  Mempool / API   http://localhost:${env('MEMPOOL_WEB_PORT', '3000')}  (Esplora REST under /api)`,
-    `  Fulcrum         localhost:50001`,
-    `  NBXplorer       http://localhost:32838`,
+    `  Fulcrum         localhost:${env('FULCRUM_TCP_PORT', '50001')}`,
+    `  NBXplorer       http://localhost:${env('NBXPLORER_PORT', '32838')}`,
   ];
   if (active.has('ark')) {
-    lines.push(`  Arkd            http://localhost:7070   (admin :7071)`);
-    lines.push(`  Arkd Wallet     http://localhost:6060`);
+    lines.push(`  Arkd            http://localhost:${env('ARKD_PORT', '7070')}   (admin :${env('ARKD_ADMIN_PORT', '7071')})`);
+    lines.push(`  Arkd Wallet     http://localhost:${env('ARKD_WALLET_PORT', '6060')}`);
     lines.push(`  Web Wallet      http://localhost:${env('WALLET_PORT', '3003')}`);
     lines.push(`  Explorer        http://localhost:${env('EXPLORER_PORT', '7080')}`);
   }
@@ -202,9 +203,19 @@ async function main() {
     return;
   }
 
+  // `rpc` is a bitcoin-cli passthrough into the bitcoin container — the in-house
+  // replacement for `nigiri rpc`. So `node regtest.mjs rpc getblockcount` maps to
+  // `bitcoin-cli -regtest … getblockcount`, keeping downstream migrations a
+  // find-replace (`nigiri rpc …` → `node regtest.mjs rpc …`, same arg shape).
+  if (argv[0] === 'rpc') {
+    const res = docker(['exec', 'bitcoin', 'bitcoin-cli', '-regtest', '-rpcuser=admin1', '-rpcpassword=123', ...argv.slice(1)]);
+    process.exitCode = res.code;
+    return;
+  }
+
   const opts = parseArgs(argv);
   if (!opts.command) {
-    fail('usage: node regtest.mjs <start|stop|clean|faucet|mine|reorg|ark|arkd> [options]');
+    fail('usage: node regtest.mjs <start|stop|clean|faucet|mine|reorg|rpc|ark|arkd> [options]');
   }
 
   // faucet/mine act on a running node and don't need override discovery, but

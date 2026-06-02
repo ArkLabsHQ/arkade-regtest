@@ -42,10 +42,10 @@ services:
     volumes:
       - bitcoin_datadir:/data
     ports:
-      - 18443:18443
-      - 18444:18444
-      - 28332:28332
-      - 28333:28333
+      - ${BITCOIN_RPC_PORT:-18443}:18443
+      - ${BITCOIN_P2P_PORT:-18444}:18444
+      - ${BITCOIN_ZMQ_BLOCK_PORT:-28332}:28332
+      - ${BITCOIN_ZMQ_TX_PORT:-28333}:28333
 
   # ── Auto-miner — mines 1 block every AUTOMINE_INTERVAL seconds ──────────────
   # On by default (600s / 10 min); set AUTOMINE_INTERVAL=0 to disable. Mines via
@@ -121,7 +121,7 @@ services:
     volumes:
       - nbxplorer_datadir:/datadir
     ports:
-      - "32838:32838"
+      - "${NBXPLORER_PORT:-32838}:32838"
 
   # ── Fulcrum (Electrum server backing mempool) ──────────────────────────────
   fulcrum:
@@ -147,8 +147,8 @@ services:
       - --ws
       - 0.0.0.0:50003
     ports:
-      - "50001:50001"
-      - "50003:50003"
+      - "${FULCRUM_TCP_PORT:-50001}:50001"
+      - "${FULCRUM_WS_PORT:-50003}:50003"
 
   # ── mempool: MariaDB + backend API + web frontend ──────────────────────────
   mempool_mariadb:
@@ -269,8 +269,8 @@ services:
     volumes:
       - lnd_datadir:/data
     ports:
-      - "9735:9735"
-      - "10009:10009"
+      - "${LND_P2P_PORT:-9735}:9735"
+      - "${LND_RPC_PORT:-10009}:10009"
 
 volumes:
   bitcoin_datadir:
