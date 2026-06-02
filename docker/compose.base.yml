@@ -81,6 +81,13 @@ services:
     container_name: postgres
     profiles: ["base"]
     restart: unless-stopped
+    # Exposed on the host so external consumers can reach the DBs directly — in
+    # particular a BTCPay ServerTester, whose `explorer.postgres` reads
+    # NBXplorer's DB straight from Postgres. 39372 is NBXplorer's conventional
+    # host port, so BTCPay's default `explorer.postgres` (127.0.0.1:39372) and a
+    # BTCPay app DB on the same server both work with no extra wiring (trust auth).
+    ports:
+      - "${POSTGRES_PORT:-39372}:5432"
     environment:
       POSTGRES_HOST_AUTH_METHOD: trust
       POSTGRES_DB: arkd

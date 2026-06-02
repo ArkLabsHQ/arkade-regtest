@@ -103,7 +103,7 @@ Variables in the override file replace their `.env.defaults` counterparts; unspe
 
 ### Host ports
 
-Every host-exposed port is configurable via `${VAR:-default}` so you can avoid local collisions or run multiple stacks side by side — only the host side is remapped; container-internal ports stay fixed. Base layer: `BITCOIN_RPC_PORT` (18443), `BITCOIN_P2P_PORT` (18444), `BITCOIN_ZMQ_BLOCK_PORT` (28332), `BITCOIN_ZMQ_TX_PORT` (28333), `NBXPLORER_PORT` (32838), `FULCRUM_TCP_PORT` (50001), `FULCRUM_WS_PORT` (50003), `LND_P2P_PORT` (9735), `LND_RPC_PORT` (10009), `MEMPOOL_WEB_PORT` (3000). Ark layer: `ARKD_PORT` (7070), `ARKD_ADMIN_PORT` (7071), `ARKD_WALLET_PORT` (6060), plus the existing Fulmine/Boltz/solver port vars. The CLI reads `ARKD_PORT`/`ARKD_ADMIN_PORT` itself, so overriding them keeps `start`'s arkd setup pointed at the right host ports.
+Every host-exposed port is configurable via `${VAR:-default}` so you can avoid local collisions or run multiple stacks side by side — only the host side is remapped; container-internal ports stay fixed. Base layer: `BITCOIN_RPC_PORT` (18443), `BITCOIN_P2P_PORT` (18444), `BITCOIN_ZMQ_BLOCK_PORT` (28332), `BITCOIN_ZMQ_TX_PORT` (28333), `NBXPLORER_PORT` (32838), `POSTGRES_PORT` (39372), `FULCRUM_TCP_PORT` (50001), `FULCRUM_WS_PORT` (50003), `LND_P2P_PORT` (9735), `LND_RPC_PORT` (10009), `MEMPOOL_WEB_PORT` (3000). Ark layer: `ARKD_PORT` (7070), `ARKD_ADMIN_PORT` (7071), `ARKD_WALLET_PORT` (6060), plus the existing Fulmine/Boltz/solver port vars. The CLI reads `ARKD_PORT`/`ARKD_ADMIN_PORT` itself, so overriding them keeps `start`'s arkd setup pointed at the right host ports.
 
 ### Custom arkd version
 
@@ -131,6 +131,7 @@ EMULATOR_IMAGE=
 | Esplora REST API   | `http://localhost:3000/api`            | 3000         |
 | Fulcrum (Electrum) | `localhost:50001` (TCP), `localhost:50003` (WS) | 50001 / 50003 |
 | NBXplorer          | `http://localhost:32838`               | 32838        |
+| Postgres           | `localhost:39372` (trust; DBs: arkd, nbxplorer) | 39372 |
 | Arkd               | `http://localhost:7070` (admin `7071`) | 7070         |
 | Arkd Wallet        | `http://localhost:6060`                | 6060         |
 | Fulmine API        | `http://localhost:7003`                | 7003         |

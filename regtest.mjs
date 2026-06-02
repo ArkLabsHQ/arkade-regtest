@@ -94,6 +94,7 @@ function banner(active) {
     `  Mempool / API   http://localhost:${env('MEMPOOL_WEB_PORT', '3000')}  (Esplora REST under /api)`,
     `  Fulcrum         localhost:${env('FULCRUM_TCP_PORT', '50001')}`,
     `  NBXplorer       http://localhost:${env('NBXPLORER_PORT', '32838')}`,
+    `  Postgres        localhost:${env('POSTGRES_PORT', '39372')}  (trust auth; DBs: arkd, nbxplorer)`,
   ];
   if (active.has('ark')) {
     lines.push(`  Arkd            http://localhost:${env('ARKD_PORT', '7070')}   (admin :${env('ARKD_ADMIN_PORT', '7071')})`);
