@@ -62,6 +62,23 @@ jobs:
           echo "== ark client CLI (initialized + funded) =="
           docker exec arkd ark balance | jq -e '.offchain_balance.total > 0'
 
+      - name: Exercise a settlement (deep flow — round + on-chain commitment)
+        run: |
+          set -euo pipefail
+          # Drives a full arkd round: the client settles its preconfirmed VTXOs
+          # into a confirmed batch, which broadcasts the commitment tx (P2A anchor
+          # + CPFP via submitpackage) and builds the VTXO tree. This exercises the
+          # esplora + submitpackage paths the lightweight balance check never hits
+          # (and which the downstream e2e suites depend on).
+          before=$(docker exec arkd ark balance | jq -r '.offchain_balance.total')
+          echo "offchain balance before settle: $before"
+          timeout 180 docker exec arkd ark settle --password secret
+          node regtest.mjs mine 1
+          sleep 5
+          after=$(docker exec arkd ark balance | jq -r '.offchain_balance.total')
+          echo "offchain balance after settle: $after"
+          test "$after" -gt 0
+
       - name: Exercise the mine helper
         run: |
           set -euo pipefail

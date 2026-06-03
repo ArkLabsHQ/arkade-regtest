@@ -21,9 +21,14 @@ services:
     container_name: arkd-wallet
     profiles: ["ark"]
     restart: unless-stopped
+    # Wait for nbxplorer to be healthy (HTTP port listening) — not just started —
+    # so arkd-wallet doesn't crash on "lookup nbxplorer: no such host" during
+    # nbxplorer's first-boot DB migration, which otherwise crash-loops arkd too.
     depends_on:
-      - bitcoin
-      - nbxplorer
+      bitcoin:
+        condition: service_started
+      nbxplorer:
+        condition: service_healthy
     environment:
       - ARKD_WALLET_LOG_LEVEL=5
       - ARKD_WALLET_NBXPLORER_URL=http://nbxplorer:32838
@@ -60,6 +65,9 @@ services:
       - ARKD_LIVE_STORE_TYPE=${ARKD_LIVE_STORE_TYPE:-inmemory}
       - ARKD_LOG_LEVEL=${ARKD_LOG_LEVEL:-4}
       - ARKD_SESSION_DURATION=${ARKD_SESSION_DURATION:-30}
+      # Single-participant rounds by default so a lone client can `ark settle`
+      # in regtest (tests rarely have multiple simultaneous participants).
+      - ARKD_ROUND_MIN_PARTICIPANTS_COUNT=${ARKD_ROUND_MIN_PARTICIPANTS_COUNT:-1}
       - ARK_OFFCHAIN_INPUT_FEE=${ARK_OFFCHAIN_INPUT_FEE:-amount * 0.01}
       - ARK_ONCHAIN_INPUT_FEE=${ARK_ONCHAIN_INPUT_FEE:-amount * 0.01}
       - ARK_OFFCHAIN_OUTPUT_FEE=${ARK_OFFCHAIN_OUTPUT_FEE:-0.0}

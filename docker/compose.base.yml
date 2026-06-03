@@ -35,6 +35,8 @@ services:
         minrelaytxfee=0
         mintxfee=0
         blockmintxfee=0
+        whitelist=0.0.0.0/0
+        whitelistforcerelay=1
         zmqpubrawblock=tcp://0.0.0.0:28332
         zmqpubrawtx=tcp://0.0.0.0:28333
         blockfilterindex=1
@@ -129,6 +131,17 @@ services:
       - nbxplorer_datadir:/datadir
     ports:
       - "${NBXPLORER_PORT:-32838}:32838"
+    # NBXplorer only binds its HTTP port after it has finished DB migrations and
+    # connected to bitcoind, so a listening port is a good "ready" signal. The
+    # image is Ubuntu (bash + /dev/tcp, no curl/wget). Gating arkd-wallet on this
+    # stops it from racing nbxplorer's first-boot (which otherwise causes the
+    # "lookup nbxplorer: no such host" / arkd crash-loop chain).
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/32838'"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
 
   # ── Fulcrum (Electrum server backing mempool) ──────────────────────────────
   fulcrum:
