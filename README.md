@@ -47,7 +47,7 @@ node regtest.mjs arkd <args...>                  # arkd server CLI, run inside t
 
 `start` initializes the `ark` client (pointed at the local arkd + mempool explorer) and seeds it with offchain funds, so commands like `node regtest.mjs ark balance` / `ark receive` / `ark send …` work out of the box. The `arkd` passthrough exposes the server CLI (e.g. `node regtest.mjs arkd note --amount 100000000`).
 
-> **Block production.** A built-in auto-miner mines one block every `AUTOMINE_INTERVAL` seconds (default **600 / 10 min**); set `AUTOMINE_INTERVAL=0` to disable it and mine only explicitly. `faucet` spends from the node wallet's balance and does **not** confirm by default — pass `--confirm` to mine a block immediately, or rely on the auto-miner / an explicit `node regtest.mjs mine`. The `start` flow mines explicitly where it needs confirmed funds, so a fresh start is deterministic regardless of the auto-miner.
+> **Block production.** A built-in auto-miner mines one block every `AUTOMINE_INTERVAL` seconds (default **600 / 10 min**); set `AUTOMINE_INTERVAL=0` to disable it and mine only explicitly. `faucet` spends from the node wallet's balance and does **not** confirm by default — pass `--confirm` to mine a block immediately, or rely on the auto-miner / an explicit `node regtest.mjs mine`. The `start` flow mines explicitly where it needs confirmed funds, so a fresh start is deterministic regardless of the auto-miner. Disable it (`AUTOMINE_INTERVAL=0`) when you configure arkd with block-denominated locktimes for fast expiry/sweep tests — see [Fast VTXO expiry & sweeps](#fast-vtxo-expiry--sweeps-block-denominated-locktimes) — so background mining can't advance the chain tip and fire sweeps mid-test.
 
 ## Architecture
 
@@ -113,6 +113,33 @@ arkd is always run from `ARKD_IMAGE` / `ARKD_WALLET_IMAGE` (there is no built-in
 ARKD_IMAGE=ghcr.io/arkade-os/arkd:v0.9.6
 ARKD_WALLET_IMAGE=ghcr.io/arkade-os/arkd-wallet:v0.9.6
 ```
+
+### Fast VTXO expiry & sweeps (block-denominated locktimes)
+
+arkd interprets `ARKD_VTXO_TREE_EXPIRY` and the exit delays (`ARKD_*_EXIT_DELAY`) **by magnitude** — the BIP68 boundary is **512** — and auto-selects its scheduler from the result:
+
+| Value      | Interpreted as              | Scheduler           | Expiry / sweeps fire when…                                            |
+| ---------- | --------------------------- | ------------------- | -------------------------------------------------------------------- |
+| **≥ 512**  | seconds                     | time (wall-clock)   | the real-time deadline passes (the default `1024` ≈ 17 min)          |
+| **< 512**  | **blocks** *(regtest only)* | block (polls the tip)| the chain **tip height** reaches the target — i.e. when you **mine** |
+
+The block path is the "fast regtest" trick: set small values and trigger VTXO-tree expiry / sweeps **instantly by mining** instead of waiting real time (arkd's mainnet default is 7 days). arkd **rejects** block-denominated locktimes on any non-regtest network. These are arkd's own e2e values:
+
+```bash
+ARKD_VTXO_TREE_EXPIRY=40
+ARKD_UNILATERAL_EXIT_DELAY=20
+ARKD_PUBLIC_UNILATERAL_EXIT_DELAY=20
+ARKD_BOARDING_EXIT_DELAY=30
+ARKD_CHECKPOINT_EXIT_DELAY=10
+AUTOMINE_INTERVAL=0   # required — see below
+```
+
+Two rules when using block values:
+
+- **Disable the auto-miner** (`AUTOMINE_INTERVAL=0`). Otherwise the background miner advances the chain tip on its own and fires sweeps/expiry mid-test, making block-height-sensitive tests non-deterministic — mine explicitly with `node regtest.mjs mine <n>` instead.
+- **All values must share the same type** (all blocks *or* all seconds). arkd validates this and refuses to start on a mismatch.
+
+The default config above (`1024` etc., all ≥ 512) uses the **seconds / time** scheduler, so a default stack is unaffected by the auto-miner.
 
 ### Emulator (arkade-script signing service)
 
