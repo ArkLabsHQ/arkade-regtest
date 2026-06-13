@@ -103,6 +103,25 @@ jobs:
           test "$after" -gt "$before"
           echo "reorg 2: height $before -> $after"
 
+      - name: Exercise signer rotation (operator key rotation + deprecation)
+        run: |
+          set -euo pipefail
+          # Rotate twice. The first rotation moves off arkd-wallet's self-generated
+          # key to a CLI-managed one (which can't be deprecated — its private key was
+          # never ours); the second deprecates THAT key with a future cutoff. Asserts
+          # the active signer changes each time and a deprecated signer is advertised,
+          # proving the rc images honor ARKD_WALLET_DEPRECATED_SIGNER_KEYS.
+          before=$(curl -sf http://localhost:7070/v1/info | jq -r '.signerPubkey')
+          node regtest.mjs rotate-signer
+          mid=$(curl -sf http://localhost:7070/v1/info | jq -r '.signerPubkey')
+          test "$before" != "$mid"
+          node regtest.mjs rotate-signer --cutoff +86400
+          after=$(curl -sf http://localhost:7070/v1/info | jq -r '.signerPubkey')
+          test "$mid" != "$after"
+          curl -sf http://localhost:7070/v1/info | jq -e '.deprecatedSigners | length >= 1'
+          node regtest.mjs signer-info
+          echo "signer rotation: $before -> $mid -> $after"
+
       - name: Dump diagnostics on failure
         if: failure()
         run: |
