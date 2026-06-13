@@ -8,6 +8,7 @@
 //   node regtest.mjs mine [n]
 //   node regtest.mjs rpc <args...>     (bitcoin-cli passthrough, in the bitcoin container)
 //   node regtest.mjs rotate-signer [--cutoff <secs>] [--new-key <hex>]  (rotate operator signer; deprecate the previous)
+//   node regtest.mjs set-signers --active <priv> [--deprecated <priv>[:<cutoff>],...]  (apply an explicit signer set)
 //   node regtest.mjs signer-info       (print the active + deprecated signer set)
 //
 // Profiles (and their dependencies) let you bring up a subset of the stack:
@@ -28,7 +29,7 @@ import { setupFulmine, setupDelegator } from './lib/setup/fulmine.mjs';
 import { setupBoltz } from './lib/setup/boltz.mjs';
 import { setupSolver } from './lib/setup/solver.mjs';
 import { createInvoice, payInvoice } from './lib/invoice.mjs';
-import { rotateSigner, signerInfo, clearSignerState } from './lib/setup/signer.mjs';
+import { rotateSigner, setSigners, signerInfo, clearSignerState } from './lib/setup/signer.mjs';
 
 // Each profile's direct prerequisites. resolveProfiles() expands the transitive
 // closure so the orchestrator can enable every profile a target tier needs.
@@ -56,7 +57,7 @@ function resolveProfiles(requested) {
 }
 
 function parseArgs(argv) {
-  const opts = { command: argv[0], env: '', clean: false, prune: false, confirm: false, cutoff: undefined, newKey: undefined, profiles: [], positional: [] };
+  const opts = { command: argv[0], env: '', clean: false, prune: false, confirm: false, cutoff: undefined, newKey: undefined, active: undefined, deprecated: undefined, profiles: [], positional: [] };
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--env') opts.env = argv[++i] || fail('--env requires a path');
@@ -69,6 +70,8 @@ function parseArgs(argv) {
     }
     else if (a === '--cutoff') opts.cutoff = argv[++i] || fail('--cutoff requires a value (unix seconds, or +N/-N seconds from now)');
     else if (a === '--new-key') opts.newKey = argv[++i] || fail('--new-key requires a 32-byte hex value');
+    else if (a === '--active') opts.active = argv[++i] || fail('--active requires a 32-byte hex private key');
+    else if (a === '--deprecated') opts.deprecated = argv[++i] ?? fail('--deprecated requires <priv>[:<cutoff>],...');
     else if (a === '--build') { /* legacy no-op: there is no build artifact anymore */ }
     else opts.positional.push(a);
   }
@@ -236,7 +239,7 @@ async function main() {
 
   const opts = parseArgs(argv);
   if (!opts.command) {
-    fail('usage: node regtest.mjs <start|stop|clean|faucet|mine|reorg|rpc|ark|arkd|rotate-signer|signer-info> [options]');
+    fail('usage: node regtest.mjs <start|stop|clean|faucet|mine|reorg|rpc|ark|arkd|rotate-signer|set-signers|signer-info> [options]');
   }
 
   // faucet/mine act on a running node and don't need override discovery, but
@@ -285,6 +288,20 @@ async function main() {
     case 'signer-info':
       await signerInfo();
       break;
+    case 'set-signers': {
+      if (!opts.active) fail('usage: node regtest.mjs set-signers --active <priv> [--deprecated <priv>[:<cutoff>],...]');
+      const deprecated = (opts.deprecated || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((entry) => {
+          const sep = entry.indexOf(':');
+          if (sep === -1) return { priv: entry.toLowerCase() };
+          return { priv: entry.slice(0, sep).toLowerCase(), cutoff: resolveCutoff(entry.slice(sep + 1)) };
+        });
+      await setSigners({ active: opts.active, deprecated });
+      break;
+    }
     default:
       fail(`unknown command: ${opts.command}`);
   }

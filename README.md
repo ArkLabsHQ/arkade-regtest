@@ -125,10 +125,13 @@ node regtest.mjs rotate-signer                 # new active key; deprecate the c
 node regtest.mjs rotate-signer --cutoff +86400 # …deprecate with a cutoff 1 day in the future (MIGRATABLE)
 node regtest.mjs rotate-signer --cutoff -3600  # …deprecate with a cutoff 1 hour in the past (EXPIRED)
 node regtest.mjs rotate-signer --new-key <hex> # rotate to a specific 32-byte hex private key
+node regtest.mjs set-signers --active <priv> --deprecated <priv>:<cutoff>,<priv>  # apply an EXPLICIT set
 node regtest.mjs signer-info                   # print the active + deprecated signer set
 ```
 
 `--cutoff` is a Unix-seconds timestamp, or a signed `+N` / `-N` offset in seconds from now. arkd classifies each deprecated signer by its cutoff: **no cutoff → DUE_NOW**, **future → MIGRATABLE**, **past → EXPIRED**.
+
+`set-signers` applies a **precise** set rather than generating keys: `--active <priv>` plus a comma-separated `--deprecated <priv>[:<cutoff>],…` (each cutoff a Unix-seconds timestamp or `+N`/`-N` offset). It's the primitive the ts-sdk e2e drives rotation through; `rotate-signer` is the convenience wrapper that generates + tracks keys for you.
 
 How it works: arkd reads its signer set from arkd-wallet's `ARKD_WALLET_SIGNER_KEY` (active) and `ARKD_WALLET_DEPRECATED_SIGNER_KEYS` (`<hexpriv>[:<cutoff>],…`) env, so a rotation recreates arkd-wallet with the new env (reusing its on-chain volume), unlocks it, and restarts arkd so it re-fetches the rotated set. The wallet boots from a **known default signer key** (`ARKD_WALLET_SIGNER_KEY` in `.env.defaults`) rather than self-generating one, and the CLI seeds `.signer-state.json` with it — so even the **first** rotation can advertise the boot signer as deprecated (arkd needs the deprecated **private** key to co-sign migration of pre-rotation funds). `clean` resets the signer set along with the wallet volume. Requires the rc images (see [Custom arkd version](#custom-arkd-version)).
 
