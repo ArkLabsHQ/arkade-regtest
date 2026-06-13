@@ -43,6 +43,8 @@ node regtest.mjs create-invoice [--secondary]    # 100k-sat invoice (boltz-lnd, 
 node regtest.mjs pay-invoice <invoice>           # pay from the non-destination node
 node regtest.mjs ark <args...>                   # ark client CLI, run inside the arkd container
 node regtest.mjs arkd <args...>                  # arkd server CLI, run inside the arkd container
+node regtest.mjs rotate-signer [--cutoff <secs>] # rotate the operator signer; deprecate the previous key
+node regtest.mjs signer-info                     # print the active + deprecated signer set
 ```
 
 `start` initializes the `ark` client (pointed at the local arkd + mempool explorer) and seeds it with offchain funds, so commands like `node regtest.mjs ark balance` / `ark receive` / `ark send …` work out of the box. The `arkd` passthrough exposes the server CLI (e.g. `node regtest.mjs arkd note --amount 100000000`).
@@ -107,12 +109,31 @@ Every host-exposed port is configurable via `${VAR:-default}` so you can avoid l
 
 ### Custom arkd version
 
-arkd is always run from `ARKD_IMAGE` / `ARKD_WALLET_IMAGE` (there is no built-in fallback). Pin a version in your override file:
+arkd is always run from `ARKD_IMAGE` / `ARKD_WALLET_IMAGE` (there is no built-in fallback). The defaults are `v0.9.9-rc.1` — the [signer rotation](#operator-signer-rotation) feature needs the rc images, since deprecated-signer support landed after `v0.9.6`. Pin a different version in your override file:
 
 ```bash
-ARKD_IMAGE=ghcr.io/arkade-os/arkd:v0.9.6
-ARKD_WALLET_IMAGE=ghcr.io/arkade-os/arkd-wallet:v0.9.6
+ARKD_IMAGE=ghcr.io/arkade-os/arkd:v0.9.9-rc.1
+ARKD_WALLET_IMAGE=ghcr.io/arkade-os/arkd-wallet:v0.9.9-rc.1
 ```
+
+### Operator signer rotation
+
+Simulate an arkd operator rotating its VTXO **signer key**: generate a new active key and advertise the previous one as a *deprecated signer* with an optional cutoff date. This drives the client-side migration / recovery flows — clients must re-sign or recover VTXOs locked to a retired signer before its cutoff.
+
+```bash
+node regtest.mjs rotate-signer                 # new active key; deprecate the current one (no cutoff → DUE_NOW)
+node regtest.mjs rotate-signer --cutoff +86400 # …deprecate with a cutoff 1 day in the future (MIGRATABLE)
+node regtest.mjs rotate-signer --cutoff -3600  # …deprecate with a cutoff 1 hour in the past (EXPIRED)
+node regtest.mjs rotate-signer --new-key <hex> # rotate to a specific 32-byte hex private key
+node regtest.mjs set-signers --active <priv> --deprecated <priv>:<cutoff>,<priv>  # apply an EXPLICIT set
+node regtest.mjs signer-info                   # print the active + deprecated signer set
+```
+
+`--cutoff` is a Unix-seconds timestamp, or a signed `+N` / `-N` offset in seconds from now. arkd classifies each deprecated signer by its cutoff: **no cutoff → DUE_NOW**, **future → MIGRATABLE**, **past → EXPIRED**.
+
+`set-signers` applies a **precise** set rather than generating keys: `--active <priv>` plus a comma-separated `--deprecated <priv>[:<cutoff>],…` (each cutoff a Unix-seconds timestamp or `+N`/`-N` offset). It's the primitive the ts-sdk e2e drives rotation through; `rotate-signer` is the convenience wrapper that generates + tracks keys for you.
+
+How it works: arkd reads its signer set from arkd-wallet's `ARKD_WALLET_SIGNER_KEY` (active) and `ARKD_WALLET_DEPRECATED_SIGNER_KEYS` (`<hexpriv>[:<cutoff>],…`) env, so a rotation recreates arkd-wallet with the new env (reusing its on-chain volume), unlocks it, and restarts arkd so it re-fetches the rotated set. The wallet boots from a **known default signer key** (`ARKD_WALLET_SIGNER_KEY` in `.env.defaults`) rather than self-generating one, and the CLI seeds `.signer-state.json` with it — so even the **first** rotation can advertise the boot signer as deprecated (arkd needs the deprecated **private** key to co-sign migration of pre-rotation funds). `clean` resets the signer set along with the wallet volume. Requires the rc images (see [Custom arkd version](#custom-arkd-version)).
 
 ### Fast VTXO expiry & sweeps (block-denominated locktimes)
 

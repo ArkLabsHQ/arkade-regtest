@@ -7,6 +7,9 @@
 //   node regtest.mjs faucet <address> <amountBtc>
 //   node regtest.mjs mine [n]
 //   node regtest.mjs rpc <args...>     (bitcoin-cli passthrough, in the bitcoin container)
+//   node regtest.mjs rotate-signer [--cutoff <secs>] [--new-key <hex>]  (rotate operator signer; deprecate the previous)
+//   node regtest.mjs set-signers --active <priv> [--deprecated <priv>[:<cutoff>],...]  (apply an explicit signer set)
+//   node regtest.mjs signer-info       (print the active + deprecated signer set)
 //
 // Profiles (and their dependencies) let you bring up a subset of the stack:
 //   ark → base,  delegate → ark,  boltz → ark,  emulator → ark,
@@ -26,6 +29,7 @@ import { setupFulmine, setupDelegator } from './lib/setup/fulmine.mjs';
 import { setupBoltz } from './lib/setup/boltz.mjs';
 import { setupSolver } from './lib/setup/solver.mjs';
 import { createInvoice, payInvoice } from './lib/invoice.mjs';
+import { rotateSigner, setSigners, signerInfo, clearSignerState } from './lib/setup/signer.mjs';
 
 // Each profile's direct prerequisites. resolveProfiles() expands the transitive
 // closure so the orchestrator can enable every profile a target tier needs.
@@ -53,7 +57,7 @@ function resolveProfiles(requested) {
 }
 
 function parseArgs(argv) {
-  const opts = { command: argv[0], env: '', clean: false, prune: false, confirm: false, profiles: [], positional: [] };
+  const opts = { command: argv[0], env: '', clean: false, prune: false, confirm: false, cutoff: undefined, newKey: undefined, active: undefined, deprecated: undefined, profiles: [], positional: [] };
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--env') opts.env = argv[++i] || fail('--env requires a path');
@@ -64,10 +68,27 @@ function parseArgs(argv) {
       const val = argv[++i] || fail('--profile requires a name');
       opts.profiles.push(...val.split(',').map((s) => s.trim()).filter(Boolean));
     }
+    else if (a === '--cutoff') opts.cutoff = argv[++i] || fail('--cutoff requires a value (unix seconds, or +N/-N seconds from now)');
+    else if (a === '--new-key') opts.newKey = argv[++i] || fail('--new-key requires a 32-byte hex value');
+    else if (a === '--active') opts.active = argv[++i] || fail('--active requires a 32-byte hex private key');
+    else if (a === '--deprecated') opts.deprecated = argv[++i] ?? fail('--deprecated requires <priv>[:<cutoff>],...');
     else if (a === '--build') { /* legacy no-op: there is no build artifact anymore */ }
     else opts.positional.push(a);
   }
   return opts;
+}
+
+// Resolve a --cutoff CLI value to a Unix-seconds timestamp for arkd. An absolute
+// value (e.g. 1781344800) is used as-is; a signed value (+N / -N) is N seconds
+// from now (future => MIGRATABLE, past => EXPIRED). Absent => no cutoff (DUE_NOW).
+function resolveCutoff(raw) {
+  if (raw == null) return undefined;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) {
+    fail(`--cutoff must be a number: unix seconds (e.g. 1781344800) or +N/-N seconds from now (got "${raw}")`);
+  }
+  const relative = /^[+-]/.test(String(raw).trim());
+  return relative ? Math.floor(Date.now() / 1000) + n : Math.trunc(n);
 }
 
 async function startEmulator() {
@@ -185,6 +206,8 @@ async function stop() {
 async function clean(opts) {
   log('Removing arkade-regtest containers and volumes...');
   composeDown({ volumes: true });
+  // arkd-wallet's volume is gone, so the persisted signer set no longer applies.
+  clearSignerState();
   if (opts.prune) {
     log('Pruning dangling images and volumes...');
     docker(['image', 'prune', '-f']);
@@ -216,7 +239,7 @@ async function main() {
 
   const opts = parseArgs(argv);
   if (!opts.command) {
-    fail('usage: node regtest.mjs <start|stop|clean|faucet|mine|reorg|rpc|ark|arkd> [options]');
+    fail('usage: node regtest.mjs <start|stop|clean|faucet|mine|reorg|rpc|ark|arkd|rotate-signer|set-signers|signer-info> [options]');
   }
 
   // faucet/mine act on a running node and don't need override discovery, but
@@ -259,6 +282,26 @@ async function main() {
     case 'pay-invoice':
       payInvoice(opts.positional[0]);
       break;
+    case 'rotate-signer':
+      await rotateSigner({ cutoff: resolveCutoff(opts.cutoff), newKey: opts.newKey });
+      break;
+    case 'signer-info':
+      await signerInfo();
+      break;
+    case 'set-signers': {
+      if (!opts.active) fail('usage: node regtest.mjs set-signers --active <priv> [--deprecated <priv>[:<cutoff>],...]');
+      const deprecated = (opts.deprecated || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((entry) => {
+          const sep = entry.indexOf(':');
+          if (sep === -1) return { priv: entry.toLowerCase() };
+          return { priv: entry.slice(0, sep).toLowerCase(), cutoff: resolveCutoff(entry.slice(sep + 1)) };
+        });
+      await setSigners({ active: opts.active, deprecated });
+      break;
+    }
     default:
       fail(`unknown command: ${opts.command}`);
   }
