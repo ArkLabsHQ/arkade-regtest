@@ -62,11 +62,11 @@ services:
       - ARKD_EVENT_DB_TYPE=badger
       - ARKD_UNLOCKER_TYPE=env
       - ARKD_UNLOCKER_PASSWORD=${ARKD_PASSWORD:-secret}
-      - ARKD_VTXO_TREE_EXPIRY=${ARKD_VTXO_TREE_EXPIRY:-1024}
-      - ARKD_UNILATERAL_EXIT_DELAY=${ARKD_UNILATERAL_EXIT_DELAY:-512}
-      - ARKD_PUBLIC_UNILATERAL_EXIT_DELAY=${ARKD_PUBLIC_UNILATERAL_EXIT_DELAY:-512}
-      - ARKD_BOARDING_EXIT_DELAY=${ARKD_BOARDING_EXIT_DELAY:-2048}
-      - ARKD_CHECKPOINT_EXIT_DELAY=${ARKD_CHECKPOINT_EXIT_DELAY:-1024}
+      - ARKD_VTXO_TREE_EXPIRY=${ARKD_VTXO_TREE_EXPIRY:-180}
+      - ARKD_UNILATERAL_EXIT_DELAY=${ARKD_UNILATERAL_EXIT_DELAY:-5}
+      - ARKD_PUBLIC_UNILATERAL_EXIT_DELAY=${ARKD_PUBLIC_UNILATERAL_EXIT_DELAY:-5}
+      - ARKD_BOARDING_EXIT_DELAY=${ARKD_BOARDING_EXIT_DELAY:-180}
+      - ARKD_CHECKPOINT_EXIT_DELAY=${ARKD_CHECKPOINT_EXIT_DELAY:-5}
       - ARKD_LIVE_STORE_TYPE=${ARKD_LIVE_STORE_TYPE:-inmemory}
       - ARKD_LOG_LEVEL=${ARKD_LOG_LEVEL:-4}
       - ARKD_SESSION_DURATION=${ARKD_SESSION_DURATION:-30}
@@ -199,13 +199,14 @@ services:
         [ark]
         host = "boltz-fulmine"
         port = 7000
-        useLocktimeSeconds = true
         rescanInterval = 30
 
         [ark.unilateralDelays]
-        claim = 444
-        refund = 444
-        refundWithoutReceiver = 720
+        ## THESE CSV VALUES ARE EXPRESSED IN BLOCKS ##
+        # If useLocktimeSeconds = true, 10 mins blocktime is used to convert the values in minutes
+        claim = 85
+        refund = 90
+        refundWithoutReceiver = 95
 
         [api]
         host = "0.0.0.0"
@@ -250,11 +251,18 @@ services:
         minSwapAmount = 1000
 
         [pairs.timeoutDelta]
-        reverse = 1440
-        chain = 1440
-        swapMinimal = 1440
-        swapMaximal = 2880
-        swapTaproot = 10080
+        ## THESE CLTV VALUES ARE EXPRESSED IN MINUTES ##
+        # If useLocktimeSeconds = false, divide them by 10 (mainnet blocktime) to get the actual
+        # values in blocks.
+        # Lnd here sets the hard lower bound: 240 (24 blocks).
+        # This means arkd must have vtxo tree expiry > 24 blocks or we can't test refund of swaps
+        # with offchain tx.
+        # Also, as per our LN environment, swapTaproot min value is 810 (81 blocks).
+        reverse = 240
+        chain = 100
+        swapMinimal = 100
+        swapMaximal = 200
+        swapTaproot = 810
 
         [[currencies]]
         symbol = "BTC"
