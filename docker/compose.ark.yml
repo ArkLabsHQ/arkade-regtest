@@ -204,9 +204,9 @@ services:
         [ark.unilateralDelays]
         ## THESE CSV VALUES ARE EXPRESSED IN BLOCKS ##
         # If useLocktimeSeconds = true, 10 mins blocktime is used to convert the values in minutes
-        claim = 85
-        refund = 90
-        refundWithoutReceiver = 95
+        claim = 105
+        refund = 110
+        refundWithoutReceiver = 115
 
         [api]
         host = "0.0.0.0"
@@ -262,7 +262,7 @@ services:
         chain = 100
         swapMinimal = 100
         swapMaximal = 200
-        swapTaproot = 810
+        swapTaproot = 1000
 
         [[currencies]]
         symbol = "BTC"
