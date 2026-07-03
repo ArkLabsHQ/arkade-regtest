@@ -262,7 +262,7 @@ services:
         chain = 100
         swapMinimal = 100
         swapMaximal = 200
-        swapTaproot = 1000
+        swapTaproot = 1200
 
         [[currencies]]
         symbol = "BTC"
