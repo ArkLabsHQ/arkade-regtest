@@ -20,7 +20,7 @@
 // Replaces the old bash scripts + the nigiri binary entirely.
 import { loadEnv, env } from './lib/env.mjs';
 import { log, warn, fail } from './lib/log.mjs';
-import { ROOT, composeUp, composeStop, composeDown, ALL_PROFILES } from './lib/compose.mjs';
+import { ROOT, composeUp, composeStop, composeDown } from './lib/compose.mjs';
 import { docker } from './lib/proc.mjs';
 import { sleep, waitForOrFail, httpOk, fetchJson } from './lib/wait.mjs';
 import { bitcoinCli, bootstrapChain, mine, faucet, reorg } from './lib/chain.mjs';
@@ -156,7 +156,10 @@ async function start(opts) {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
-  const requested = opts.profiles.length ? opts.profiles : fromEnv.length ? fromEnv : ALL_PROFILES;
+  // Default to every resolvable tier (base..solver). Not ALL_PROFILES: that set
+  // also carries solver-init, a one-shot init container run on demand inside
+  // setupSolver() — it is not a startable tier and resolveProfiles() rejects it.
+  const requested = opts.profiles.length ? opts.profiles : fromEnv.length ? fromEnv : Object.keys(PROFILE_DEPS);
   const active = new Set(resolveProfiles(requested));
 
   // Emulator opt-out: clearing EMULATOR_IMAGE disables it — and the solver,
