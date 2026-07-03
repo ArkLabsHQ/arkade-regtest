@@ -376,29 +376,61 @@ services:
       - type: tmpfs
         target: /app/data
 
+  # ── Pricefeed (mock swap prices for the solver) — profile `solver` ─────────
+  pricefeed:
+    image: nginx:alpine
+    container_name: pricefeed
+    profiles: ["solver"]
+    restart: unless-stopped
+    ports:
+      - '${PRICEFEED_PORT:-8088}:80'
+    volumes:
+      - ./pricefeed:/usr/share/nginx/html:ro
+
   # ── Solver (arkade virtual-mempool intent solver) — profile `solver` ───────
   # Depends on arkd (SOLVER_ARK_URL) and the emulator (SOLVER_EMULATOR_URL), so
   # the orchestrator's `solver` profile also pulls in `ark` and `emulator`.
-  # solverd's own listeners stay on the in-container 7070/7071 defaults; only
+  # solverd's own listeners stay on the in-container 7170/7171 defaults; only
   # the host ports are remapped (7090/7091) to avoid colliding with arkd.
   solver:
-    image: ${SOLVER_IMAGE:-ghcr.io/arkade-os/solver:v0.0.1-rc.5}
+    image: ${SOLVER_IMAGE:-ghcr.io/arkade-os/solver:v0.0.1-rc.6}
     container_name: solver
     profiles: ["solver"]
     restart: unless-stopped
     depends_on:
       - arkd
+      - pricefeed
     environment:
       SOLVER_ARK_URL: arkd:7070
       SOLVER_EMULATOR_URL: http://emulator:7073
+      SOLVER_EXPLORER_URL: http://mempool_web/api
       SOLVER_WALLET_SEED: ${SOLVER_WALLET_SEED}
       SOLVER_WALLET_PASSWORD: ${SOLVER_WALLET_PASSWORD:-password}
       SOLVER_LOG_LEVEL: ${SOLVER_LOG_LEVEL:-4}
     ports:
-      - '${SOLVER_GRPC_PORT:-7090}:7070'
-      - '${SOLVER_HTTP_PORT:-7091}:7071'
+      - '${SOLVER_GRPC_PORT:-7090}:7170'
+      - '${SOLVER_HTTP_PORT:-7091}:7171'
     volumes:
       - solver_datadir:/app/data
+
+  # ── Solver init — one-shot, run by the orchestrator via `compose run` ──────
+  # Gated behind its own profile so it never comes up with `up`. The credit note
+  # to fund it is passed in as INIT_NOTE at run time.
+  solver-init:
+    build: ./solver-init
+    image: arkade-regtest/solver-init
+    container_name: solver-init
+    profiles: ["solver-init"]
+    depends_on:
+      - solver
+    environment:
+      ARK_SERVER_URL: http://arkd:7070
+      ESPLORA_URL: http://mempool_web/api
+      SOLVER_HTTP_URL: http://solver:7171
+      PRICEFEED_BASE: http://pricefeed
+      SOLVER_INIT_BTC: ${SOLVER_INIT_BTC:-1000000}
+      SOLVER_INIT_ASSET_SUPPLY: ${SOLVER_INIT_ASSET_SUPPLY:-100000}
+      SOLVER_INIT_ASSET_FUNDING: ${SOLVER_INIT_ASSET_FUNDING:-50000}
 
 volumes:
   ark_wallet_datadir:

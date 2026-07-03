@@ -78,7 +78,7 @@ Services are grouped into compose profiles so you can bring up just the tier you
 | `delegate` | fulmine-delegator                                                 | `ark`             |
 | `boltz`    | boltz, boltz-fulmine, boltz-lnd, nginx-boltz, lnurl-server        | `ark`             |
 | `emulator` | emulator                                                          | `ark`             |
-| `solver`   | solver                                                            | `ark`, `emulator` |
+| `solver`   | solver, pricefeed                                                 | `ark`, `emulator` |
 
 ```bash
 node regtest.mjs start                      # full stack (all profiles)
@@ -90,6 +90,8 @@ node regtest.mjs start --profile emulator --profile boltz   # combine targets
 ```
 
 You can also pin profiles via the `REGTEST_PROFILES` env var (comma-separated, e.g. in `.env.regtest`) instead of passing `--profile`. Precedence: `--profile` flags > `REGTEST_PROFILES` > full stack.
+
+Starting the `solver` profile also bootstraps it: once solverd is up, a one-shot container funds it with BTC and a freshly minted regtest asset, then registers `BTC/<asset>` trading pairs against the mock `pricefeed`. Amounts are tunable via `SOLVER_INIT_BTC`, `SOLVER_INIT_ASSET_SUPPLY`, and `SOLVER_INIT_ASSET_FUNDING`.
 
 `stop` and `clean` always act on the whole project regardless of profiles.
 
@@ -192,6 +194,7 @@ EMULATOR_IMAGE=
 | Emulator           | `http://localhost:7073`                | 7073         |
 | Solver HTTP        | `http://localhost:7091`                | 7091         |
 | Solver gRPC        | `localhost:7090`                       | 7090         |
+| Pricefeed          | `http://localhost:8088`                | 8088         |
 
 ## Using as a git submodule
 
