@@ -146,8 +146,8 @@ services:
       - FULMINE_LND_DATADIR=/root/.lnd
       - FULMINE_DELEGATE_ENABLED=true
       - FULMINE_DELEGATE_FEE=350
-      # short coalescing window so delegate e2e settles promptly (prod default is 1h)
-      - FULMINE_DELEGATE_REGISTRATION_COALESCE_WINDOW=5
+      # disable coalescing in e2e so delegate flows behave immediately (prod default is 1h; coalescing is unit-tested)
+      - FULMINE_DELEGATE_REGISTRATION_COALESCE_WINDOW=0
     ports:
       - ${FULMINE_GRPC_PORT:-7004}:7000
       - ${FULMINE_API_PORT:-7003}:7001
@@ -169,8 +169,8 @@ services:
       - FULMINE_UNLOCKER_TYPE=env
       - FULMINE_UNLOCKER_PASSWORD=password
       - FULMINE_DELEGATE_ENABLED=true
-      # short coalescing window so delegate e2e settles promptly (prod default is 1h)
-      - FULMINE_DELEGATE_REGISTRATION_COALESCE_WINDOW=5
+      # disable coalescing in e2e so delegate flows behave immediately (prod default is 1h; coalescing is unit-tested)
+      - FULMINE_DELEGATE_REGISTRATION_COALESCE_WINDOW=0
     ports:
       - ${DELEGATOR_GRPC_PORT:-7010}:7000
       - ${DELEGATOR_API_PORT:-7011}:7001
