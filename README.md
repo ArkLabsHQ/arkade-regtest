@@ -111,11 +111,11 @@ Every host-exposed port is configurable via `${VAR:-default}` so you can avoid l
 
 ### Custom arkd version
 
-arkd is always run from `ARKD_IMAGE` / `ARKD_WALLET_IMAGE` (there is no built-in fallback). The defaults are `v0.9.9-rc.1` — the [signer rotation](#operator-signer-rotation) feature needs the rc images, since deprecated-signer support landed after `v0.9.6`. Pin a different version in your override file:
+arkd is always run from `ARKD_IMAGE` / `ARKD_WALLET_IMAGE` (there is no built-in fallback). The defaults are `v0.9.11` — the [signer rotation](#operator-signer-rotation) feature needs deprecated-signer support, which landed in arkd `v0.9.10`+ (after `v0.9.6`). Pin a different version in your override file:
 
 ```bash
-ARKD_IMAGE=ghcr.io/arkade-os/arkd:v0.9.9-rc.1
-ARKD_WALLET_IMAGE=ghcr.io/arkade-os/arkd-wallet:v0.9.9-rc.1
+ARKD_IMAGE=ghcr.io/arkade-os/arkd:v0.9.11
+ARKD_WALLET_IMAGE=ghcr.io/arkade-os/arkd-wallet:v0.9.11
 ```
 
 ### Operator signer rotation

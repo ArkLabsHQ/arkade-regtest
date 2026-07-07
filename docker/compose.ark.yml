@@ -17,7 +17,7 @@ name: arkade-regtest
 services:
   # ── arkd wallet (signer + on-chain wallet, backed by nbxplorer) ────────────
   arkd-wallet:
-    image: ${ARKD_WALLET_IMAGE:-ghcr.io/arkade-os/arkd-wallet:v0.9.9-rc.1}
+    image: ${ARKD_WALLET_IMAGE:-ghcr.io/arkade-os/arkd-wallet:v0.9.11}
     container_name: arkd-wallet
     profiles: ["ark"]
     restart: unless-stopped
@@ -46,7 +46,7 @@ services:
 
   # ── arkd (Ark server) ──────────────────────────────────────────────────────
   arkd:
-    image: ${ARKD_IMAGE:-ghcr.io/arkade-os/arkd:v0.9.9-rc.1}
+    image: ${ARKD_IMAGE:-ghcr.io/arkade-os/arkd:v0.9.11}
     container_name: arkd
     profiles: ["ark"]
     restart: unless-stopped
