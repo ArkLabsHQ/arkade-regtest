@@ -397,7 +397,7 @@ services:
   # started as an overlay after the emulator is ready. Only the HTTP REST
   # gateway (7071) is published, remapped to 7271 to avoid arkd's 7070/7071.
   covclaimd:
-    image: ${COVCLAIMD_IMAGE:-ghcr.io/arkade-os/covclaimd:v0.0.1-rc.0}
+    image: ${COVCLAIMD_IMAGE:-ghcr.io/arkade-os/covclaimd:v0.0.1-rc.1}
     container_name: covclaimd
     profiles:
       - covclaimd
