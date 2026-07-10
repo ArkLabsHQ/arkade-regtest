@@ -391,6 +391,28 @@ services:
     volumes:
       - ./pricefeed:/usr/share/nginx/html:ro
 
+  # ── covclaimd (non-interactive claim daemon) — profile `covclaimd` ─────────
+  # Watches arkd's tx stream and sweeps preimage-gated VHTLCs through the
+  # emulator, so the `covclaimd` profile pulls in `ark` and `emulator` and is
+  # started as an overlay after the emulator is ready. Only the HTTP REST
+  # gateway (7071) is published, remapped to 7271 to avoid arkd's 7070/7071.
+  covclaimd:
+    image: ${COVCLAIMD_IMAGE:-ghcr.io/arkade-os/covclaimd:v0.0.1-rc.0}
+    container_name: covclaimd
+    profiles:
+      - covclaimd
+    restart: unless-stopped
+    ports:
+      - '${COVCLAIMD_HTTP_PORT:-7271}:7071'
+    environment:
+      COVCLAIMD_ARK_URL: ${COVCLAIMD_ARK_URL:-arkd:7070}
+      COVCLAIMD_EMULATOR_URL: ${COVCLAIMD_EMULATOR_URL:-emulator:7073}
+      COVCLAIMD_SECRET_KEY: ${COVCLAIMD_SECRET_KEY}
+      COVCLAIMD_HTTP_PORT: '7071'
+      COVCLAIMD_GRPC_PORT: '7070'
+      COVCLAIMD_REVEAL_ENABLED: 'true'
+      COVCLAIMD_LOG_LEVEL: ${COVCLAIMD_LOG_LEVEL:-4}
+
   # ── Solver (arkade virtual-mempool intent solver) — profile `solver` ───────
   # Depends on arkd (SOLVER_ARK_URL) and the emulator (SOLVER_EMULATOR_URL), so
   # the orchestrator's `solver` profile also pulls in `ark` and `emulator`.
