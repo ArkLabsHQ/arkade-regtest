@@ -39,6 +39,7 @@ const PROFILE_DEPS = {
   delegate: ['ark'], // standalone fulmine-delegator
   boltz: ['ark'], // boltz + its own boltz-fulmine + boltz-lnd (independent of the delegator)
   emulator: ['ark'],
+  covclaimd: ['ark', 'emulator'], // non-interactive claim daemon; needs arkd + emulator
   solver: ['ark', 'emulator'],
 };
 
@@ -104,6 +105,20 @@ async function startEmulator() {
   log(`Emulator up at http://localhost:${port} (signerPubkey: ${json?.signerPubkey || '?'})`);
 }
 
+async function startCovclaimd() {
+  if (!env('COVCLAIMD_IMAGE')) {
+    log('covclaimd disabled (COVCLAIMD_IMAGE empty), skipping...');
+    return;
+  }
+  const port = env('COVCLAIMD_HTTP_PORT', '7271');
+  log(`Starting covclaimd overlay (${env('COVCLAIMD_IMAGE')})...`);
+  composeUp(['covclaimd'], { profiles: ['covclaimd'] });
+  await waitForOrFail('covclaimd pubkey', () =>
+    httpOk(`http://localhost:${port}/v1/preimage/covclaimd-pubkey`),
+  );
+  log(`covclaimd up at http://localhost:${port} (reveal enabled)`);
+}
+
 function banner(active) {
   const lines = [
     '',
@@ -135,6 +150,9 @@ function banner(active) {
   if (active.has('emulator')) {
     lines.push(`  Emulator        http://localhost:${env('EMULATOR_PORT', '7073')}`);
   }
+  if (active.has('covclaimd')) {
+    lines.push(`  covclaimd       http://localhost:${env('COVCLAIMD_HTTP_PORT', '7271')}`);
+  }
   if (active.has('solver')) {
     lines.push(`  Solver HTTP     http://localhost:${env('SOLVER_HTTP_PORT', '7091')}`);
     lines.push(`  Solver gRPC     localhost:${env('SOLVER_GRPC_PORT', '7090')}`);
@@ -162,11 +180,17 @@ async function start(opts) {
   const requested = opts.profiles.length ? opts.profiles : fromEnv.length ? fromEnv : Object.keys(PROFILE_DEPS);
   const active = new Set(resolveProfiles(requested));
 
-  // Emulator opt-out: clearing EMULATOR_IMAGE disables it — and the solver,
-  // which requires the emulator (SOLVER_EMULATOR_URL).
+  // Emulator opt-out: clearing EMULATOR_IMAGE disables it — and the solver +
+  // covclaimd, which both require the emulator.
   if (!env('EMULATOR_IMAGE')) {
     if (active.delete('emulator')) log('Emulator disabled (EMULATOR_IMAGE empty)');
     if (active.delete('solver')) warn('Solver needs the emulator; skipping it (EMULATOR_IMAGE is empty)');
+    if (active.delete('covclaimd')) warn('covclaimd needs the emulator; skipping it (EMULATOR_IMAGE is empty)');
+  }
+
+  // covclaimd opt-out: clearing COVCLAIMD_IMAGE disables it independently.
+  if (!env('COVCLAIMD_IMAGE') && active.delete('covclaimd')) {
+    log('covclaimd disabled (COVCLAIMD_IMAGE empty)');
   }
 
   const profiles = [...active];
@@ -208,6 +232,7 @@ async function start(opts) {
     await setupBoltz();
   }
   if (active.has('emulator')) await startEmulator();
+  if (active.has('covclaimd')) await startCovclaimd();
   if (active.has('solver')) await setupSolver();
   // Apply the configured arkd intent fees last — every wallet above settles/
   // redeems with fees zeroed, so this must run after all of them.
