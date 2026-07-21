@@ -19,7 +19,7 @@ services:
   arkd-wallet:
     image: ${ARKD_WALLET_IMAGE:-ghcr.io/arkade-os/arkd-wallet:v0.9.14}
     container_name: arkd-wallet
-    profiles: ["ark"]
+    profiles: ['ark']
     restart: unless-stopped
     # Wait for nbxplorer to be healthy (HTTP port listening) — not just started —
     # so arkd-wallet doesn't crash on "lookup nbxplorer: no such host" during
@@ -48,7 +48,7 @@ services:
   arkd:
     image: ${ARKD_IMAGE:-ghcr.io/arkade-os/arkd:v0.9.14}
     container_name: arkd
-    profiles: ["ark"]
+    profiles: ['ark']
     restart: unless-stopped
     depends_on:
       - arkd-wallet
@@ -88,7 +88,7 @@ services:
     image: ${BOLTZ_LND_IMAGE:-btcpayserver/lnd:v0.19.3-beta}
     restart: unless-stopped
     container_name: boltz-lnd
-    profiles: ["boltz"]
+    profiles: ['boltz']
     environment:
       LND_CHAIN: 'btc'
       LND_ENVIRONMENT: 'regtest'
@@ -132,7 +132,7 @@ services:
   boltz-fulmine:
     image: ${FULMINE_IMAGE:-ghcr.io/arklabshq/fulmine:v0.3.25}
     container_name: boltz-fulmine
-    profiles: ["boltz"]
+    profiles: ['boltz']
     environment:
       - FULMINE_ARK_SERVER=http://arkd:7070
       - FULMINE_ESPLORA_URL=http://mempool_web/api
@@ -152,7 +152,7 @@ services:
   fulmine-delegator:
     image: ${FULMINE_IMAGE:-ghcr.io/arklabshq/fulmine:v0.3.25}
     container_name: fulmine-delegator
-    profiles: ["delegate"]
+    profiles: ['delegate']
     environment:
       - FULMINE_ARK_SERVER=http://arkd:7070
       - FULMINE_ESPLORA_URL=http://mempool_web/api
@@ -176,7 +176,7 @@ services:
   boltz:
     image: ${BOLTZ_IMAGE:-boltz/boltz:latest}
     container_name: boltz
-    profiles: ["boltz"]
+    profiles: ['boltz']
     restart: unless-stopped
     ports:
       - '${BOLTZ_GRPC_PORT:-9000}:9000'
@@ -306,12 +306,12 @@ services:
   nginx-boltz:
     image: ${NGINX_IMAGE:-nginx:alpine}
     container_name: nginx-boltz
-    profiles: ["boltz"]
+    profiles: ['boltz']
     restart: unless-stopped
     ports:
       - '${NGINX_PORT:-9069}:9069'
     volumes:
-      - ./cors.nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./boltz.nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - boltz
 
@@ -319,7 +319,7 @@ services:
   lnurl-server:
     image: ${LNURL_IMAGE:-ghcr.io/arklabshq/lnurl-server:0.2.6}
     container_name: lnurl-server
-    profiles: ["boltz"]
+    profiles: ['boltz']
     ports:
       - '${LNURL_PORT:-9090}:3000'
     environment:
@@ -334,7 +334,7 @@ services:
   arkade-wallet:
     image: ${WALLET_IMAGE:-ghcr.io/arkade-os/wallet:latest}
     container_name: arkade-wallet
-    profiles: ["ark"]
+    profiles: ['ark']
     ports:
       - '${WALLET_PORT:-3003}:80'
     environment:
@@ -349,7 +349,7 @@ services:
   arkade-explorer:
     image: ${EXPLORER_IMAGE:-ghcr.io/arklabshq/arkade-explorer:latest}
     container_name: arkade-explorer
-    profiles: ["ark"]
+    profiles: ['ark']
     restart: unless-stopped
     depends_on:
       - arkd
@@ -385,7 +385,7 @@ services:
   pricefeed:
     image: nginx:alpine
     container_name: pricefeed
-    profiles: ["solver"]
+    profiles: ['solver']
     restart: unless-stopped
     ports:
       - '${PRICEFEED_PORT:-8088}:80'
@@ -422,7 +422,7 @@ services:
   solver:
     image: ${SOLVER_IMAGE:-ghcr.io/arkade-os/solver:v0.0.1-rc.6}
     container_name: solver
-    profiles: ["solver"]
+    profiles: ['solver']
     restart: unless-stopped
     depends_on:
       - arkd
@@ -447,7 +447,7 @@ services:
     build: ./solver-init
     image: arkade-regtest/solver-init
     container_name: solver-init
-    profiles: ["solver-init"]
+    profiles: ['solver-init']
     depends_on:
       - solver
     environment:
