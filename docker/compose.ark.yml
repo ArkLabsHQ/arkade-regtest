@@ -391,6 +391,7 @@ services:
       - '${PRICEFEED_PORT:-8088}:80'
     volumes:
       - ./pricefeed:/usr/share/nginx/html:ro
+      - ./pricefeed.nginx.conf:/etc/nginx/conf.d/default.conf:ro
 
   # ── covclaimd (non-interactive claim daemon) — profile `covclaimd` ─────────
   # Watches arkd's tx stream and sweeps preimage-gated VHTLCs through the
