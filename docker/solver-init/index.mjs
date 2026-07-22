@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // arkade-regtest equivalent of the solver repo's `make init-solverd`: funds
-// solverd with BTC and a minted asset, then registers its trading pairs.
+// solverd with BTC and a minted asset, then registers its market.
 import { EventSource } from 'eventsource';
 import {
   Wallet,
@@ -58,7 +58,16 @@ async function main() {
   });
   await waitBalance(wallet, (b) => BigInt(b.available) >= cfg.btcFunding, 'funder BTC');
 
-  // solverd's pair validation resolves "decimals" metadata via the indexer, so
+  // BTC first: a send picks sat carriers from the whole VTXO set, so minting
+  // before this would let it spend the fresh asset VTXO out from under us.
+  log(`funding solver with ${cfg.btcFunding} sats...`);
+  await wallet.send({ address: solverAddr, amount: Number(cfg.btcFunding) });
+  await pollSolverBalance(
+    (b) => BigInt(b.offchainSettled ?? 0) >= (cfg.btcFunding * 9n) / 10n,
+    'solver BTC',
+  );
+
+  // solverd's market validation resolves "decimals" metadata via the indexer, so
   // it must be set at issuance.
   log(`minting asset (supply ${cfg.assetSupply})...`);
   const { assetId } = await wallet.assetManager.issue({
@@ -68,24 +77,20 @@ async function main() {
   log('minted asset:', assetId);
   await waitBalance(wallet, (b) => assetBalance(b, assetId) >= cfg.assetSupply, 'funder asset');
 
-  log(`funding solver with ${cfg.btcFunding} sats...`);
-  await wallet.send({ address: solverAddr, amount: Number(cfg.btcFunding) });
-  await pollSolverBalance(
-    (b) => BigInt(b.offchainSettled ?? 0) >= (cfg.btcFunding * 9n) / 10n,
-    'solver BTC',
-  );
-
   log(`funding solver with ${cfg.assetFunding} units of asset...`);
-  await wallet.send({ address: solverAddr, assets: [{ assetId, amount: cfg.assetFunding }] });
+  await wallet.send({
+    address: solverAddr,
+    amount: Number(cfg.assetFunding), // BTC carrier for the asset VTXO
+    assets: [{ assetId, amount: cfg.assetFunding }],
+  });
   await pollSolverBalance(
     (b) => BigInt(b.assetBalances?.[assetId] ?? 0) >= cfg.assetFunding,
     'solver asset',
   );
 
-  await addPair(`BTC/${assetId}`, `${cfg.pricefeedBase}/btc-asset`);
-  await addPair(`${assetId}/BTC`, `${cfg.pricefeedBase}/asset-btc`);
+  await addMarket('BTC', assetId, `${cfg.pricefeedBase}/btc-asset`, '/btc/asset');
 
-  log('done: solver funded, asset minted, pairs registered');
+  log('done: solver funded, asset minted, market registered');
   await wallet.dispose().catch(() => {});
 }
 
@@ -145,11 +150,24 @@ function normalizeBalance(b) {
   };
 }
 
-async function addPair(pair, priceFeed) {
-  await postJson(`${cfg.solverHttpUrl}/v1/pair`, {
-    pair: { pair, min_amount: 1, max_amount: 100_000_000, price_feed: priceFeed },
+// The feed returns quote-per-base; both directions are enabled by giving each
+// its own want-side bounds (a zero max would disable that side). price_path is
+// the JSON pointer to the price in the feed response — required since solver
+// v0.0.3 for anything that isn't a Binance/CoinGecko URL.
+async function addMarket(baseAsset, quoteAsset, priceFeed, pricePath) {
+  await postJson(`${cfg.solverHttpUrl}/v1/market`, {
+    market: {
+      base_asset: baseAsset,
+      quote_asset: quoteAsset,
+      min_quote_amount: 1,
+      max_quote_amount: 100_000_000,
+      min_base_amount: 1,
+      max_base_amount: 100_000_000,
+      price_feed: priceFeed,
+      price_path: pricePath,
+    },
   });
-  log(`added pair ${pair}`);
+  log(`added market ${baseAsset}/${quoteAsset}`);
 }
 
 async function getJson(url) {

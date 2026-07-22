@@ -17,7 +17,7 @@ name: arkade-regtest
 services:
   # ── arkd wallet (signer + on-chain wallet, backed by nbxplorer) ────────────
   arkd-wallet:
-    image: ${ARKD_WALLET_IMAGE:-ghcr.io/arkade-os/arkd-wallet:v0.9.14}
+    image: ${ARKD_WALLET_IMAGE:-ghcr.io/arkade-os/arkd-wallet:v0.9.15}
     container_name: arkd-wallet
     profiles: ["ark"]
     restart: unless-stopped
@@ -46,7 +46,7 @@ services:
 
   # ── arkd (Ark server) ──────────────────────────────────────────────────────
   arkd:
-    image: ${ARKD_IMAGE:-ghcr.io/arkade-os/arkd:v0.9.14}
+    image: ${ARKD_IMAGE:-ghcr.io/arkade-os/arkd:v0.9.15}
     container_name: arkd
     profiles: ["ark"]
     restart: unless-stopped
@@ -420,7 +420,7 @@ services:
   # solverd's own listeners stay on the in-container 7170/7171 defaults; only
   # the host ports are remapped (7090/7091) to avoid colliding with arkd.
   solver:
-    image: ${SOLVER_IMAGE:-ghcr.io/arkade-os/solver:v0.0.1-rc.6}
+    image: ${SOLVER_IMAGE:-ghcr.io/arkade-os/solver:v0.0.3}
     container_name: solver
     profiles: ["solver"]
     restart: unless-stopped
