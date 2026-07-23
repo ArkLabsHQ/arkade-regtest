@@ -91,7 +91,7 @@ node regtest.mjs start --profile emulator --profile boltz   # combine targets
 
 You can also pin profiles via the `REGTEST_PROFILES` env var (comma-separated, e.g. in `.env.regtest`) instead of passing `--profile`. Precedence: `--profile` flags > `REGTEST_PROFILES` > full stack.
 
-Starting the `solver` profile also bootstraps it: once solverd is up, a one-shot container funds it with BTC and a freshly minted regtest asset, then registers `BTC/<asset>` trading pairs against the mock `pricefeed`. Amounts are tunable via `SOLVER_INIT_BTC`, `SOLVER_INIT_ASSET_SUPPLY`, and `SOLVER_INIT_ASSET_FUNDING`.
+Starting the `solver` profile also bootstraps it: once solverd is up, a one-shot container funds it with BTC and a freshly minted regtest asset, then registers a bidirectional `BTC/<asset>` market against the mock `pricefeed`. Amounts are tunable via `SOLVER_INIT_BTC`, `SOLVER_INIT_ASSET_SUPPLY`, and `SOLVER_INIT_ASSET_FUNDING`.
 
 `stop` and `clean` always act on the whole project regardless of profiles.
 
