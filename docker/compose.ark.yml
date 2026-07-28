@@ -188,6 +188,7 @@ services:
       BOLTZ_CONFIG: |
         loglevel = "debug"
         network = "regtest"
+        nonInteractiveClaims = true
 
         [ark]
         host = "boltz-fulmine"
