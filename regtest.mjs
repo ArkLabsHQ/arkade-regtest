@@ -13,7 +13,8 @@
 //
 // Profiles (and their dependencies) let you bring up a subset of the stack:
 //   ark → base,  delegate → ark,  boltz → ark,  emulator → ark,
-//   solver → ark + emulator. `--profile boltz` brings up base+ark+boltz.
+//   solver → ark + emulator,  sync → base. `--profile boltz` brings up
+//   base+ark+boltz; `--profile sync` skips the Ark stack entirely.
 //   Selection precedence: --profile flags > REGTEST_PROFILES env (comma-list)
 //   > full stack.
 //
@@ -41,6 +42,7 @@ const PROFILE_DEPS = {
   emulator: ['ark'],
   covclaimd: ['ark', 'emulator'], // non-interactive claim daemon; needs arkd + emulator
   solver: ['ark', 'emulator'],
+  sync: ['base'], // bucket-sync-server — opaque key/value store, no Ark dependency
 };
 
 function resolveProfiles(requested) {
@@ -119,6 +121,17 @@ async function startCovclaimd() {
   log(`covclaimd up at http://localhost:${port} (reveal enabled)`);
 }
 
+// The bucket sync server needs no post-boot setup — clients create their own
+// buckets on demand — so this only waits until it answers, and the banner never
+// advertises a port that isn't serving yet. Its image carries no curl/wget (it's
+// a native binary on runtime-deps), so this host-side poll stands in for the
+// compose healthcheck it can't have.
+async function waitForBucketSync() {
+  const port = env('BUCKET_SYNC_PORT', '7100');
+  await waitForOrFail('bucket-sync /health', () => httpOk(`http://localhost:${port}/health`));
+  log(`Bucket sync up at http://localhost:${port} (Postgres DB: ${env('BUCKET_SYNC_DB', 'bucketsync')})`);
+}
+
 function banner(active) {
   const lines = [
     '',
@@ -156,6 +169,9 @@ function banner(active) {
   if (active.has('solver')) {
     lines.push(`  Solver HTTP     http://localhost:${env('SOLVER_HTTP_PORT', '7091')}`);
     lines.push(`  Solver gRPC     localhost:${env('SOLVER_GRPC_PORT', '7090')}`);
+  }
+  if (active.has('sync')) {
+    lines.push(`  Bucket Sync     http://localhost:${env('BUCKET_SYNC_PORT', '7100')}  (DB: ${env('BUCKET_SYNC_DB', 'bucketsync')})`);
   }
   lines.push(
     '',
@@ -224,6 +240,10 @@ async function start(opts) {
     const appWave = composeUp([], { profiles });
     if (appWave.code !== 0) fail('docker compose up failed');
   }
+
+  // Only depends on `base`, so it is ready earliest — check it before arkd's
+  // slow setup, so a bad image or unreachable database fails fast.
+  if (active.has('sync')) await waitForBucketSync();
 
   if (active.has('ark')) await setupArkd();
   if (active.has('delegate')) await setupDelegator();

@@ -59,6 +59,14 @@ jobs:
           echo "== Arkade explorer =="
           curl -sf http://localhost:7080/ -o /dev/null
 
+          echo "== Bucket sync server =="
+          curl -sf http://localhost:7100/health | jq -e '.status == "ok"'
+          # Issuing a challenge writes to the Postgres-backed challenge store, so
+          # this proves the DB wiring end to end and not just that the port is open.
+          curl -sf -X POST http://localhost:7100/v1/auth/schnorr/challenge | jq -e '.nonce != null'
+          # bucket-sync-initdb created the database and the server migrated into it.
+          test "$(docker exec postgres psql -U postgres -d bucketsync -tAc 'SELECT count(*) FROM schema_migrations')" -gt 0
+
           echo "== ark client CLI (initialized + funded) =="
           docker exec arkd ark balance | jq -e '.offchain_balance.total > 0'
 
@@ -140,7 +148,7 @@ jobs:
         if: failure()
         run: |
           docker compose -f docker/compose.base.yml -f docker/compose.ark.yml ps || true
-          for c in bitcoin fulcrum mempool_api mempool_web nbxplorer arkd-wallet arkd arkade-wallet arkade-explorer boltz boltz-lnd boltz-fulmine emulator solver; do
+          for c in bitcoin fulcrum mempool_api mempool_web nbxplorer arkd-wallet arkd arkade-wallet arkade-explorer boltz boltz-lnd boltz-fulmine emulator solver bucket-sync-initdb bucket-sync; do
             echo "===== logs: $c ====="
             docker logs --tail 80 "$c" 2>&1 || true
           done
