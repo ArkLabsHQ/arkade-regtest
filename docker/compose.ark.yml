@@ -507,6 +507,10 @@ services:
       # No password: the shared postgres runs trust auth (same as nbxplorer).
       ConnectionStrings__Postgres: Host=postgres;Port=5432;Username=postgres;Database=${BUCKET_SYNC_DB:-bucketsync}
       ASPNETCORE_URLS: http://+:8080
+      # Lets browser clients call it cross-origin. `-` rather than `:-` on purpose, so
+      # clearing BUCKET_SYNC_CORS in an override disables CORS instead of re-defaulting
+      # to `*` (same "clear it to turn it off" idiom as EMULATOR_IMAGE).
+      Cors__AllowedOrigins: ${BUCKET_SYNC_CORS-*}
     ports:
       - '${BUCKET_SYNC_PORT:-7100}:8080'
 
