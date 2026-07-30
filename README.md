@@ -1,6 +1,6 @@
 # arkade-regtest
 
-A self-contained, cross-platform regtest environment for Ark protocol development. It orchestrates Bitcoin Core, Fulcrum, mempool, NBXplorer, arkd, Fulmine, Boltz, and an LND node into a single reproducible Docker Compose stack — driven by a small zero-dependency Node CLI.
+A self-contained, cross-platform regtest environment for Ark protocol development. It orchestrates Bitcoin Core, Fulcrum, mempool, NBXplorer, arkd, Fulmine, Boltz, an LND node, and an end-to-end-encrypted bucket sync server into a single reproducible Docker Compose stack — driven by a small zero-dependency Node CLI.
 
 There is **no dependency on nigiri** and **no compiled binary** to maintain: everything is standard Docker images plus a Node orchestrator. It runs the same on Linux, macOS, and Windows (no WSL required).
 
@@ -60,7 +60,8 @@ Two compose files are merged into one project (`arkade-regtest`):
   `mempool_api` + `mempool_web` + `mempool_mariadb` (block explorer & Esplora REST API), and `lnd`.
 - **`docker/compose.ark.yml`** — the Ark stack: `arkd` + `arkd-wallet`, `boltz`, `boltz-lnd`,
   `boltz-fulmine`, `fulmine-delegator`, `nginx-boltz`, `lnurl-server`, `arkade-wallet`, and the
-  profile-gated `emulator`.
+  profile-gated `emulator` — plus `bucket-sync` (and its one-shot `bucket-sync-initdb`), which
+  rides on the same base but has no Ark dependency of its own.
 
 arkd and Fulmine consume the **Esplora-compatible REST API that mempool serves under `/api`**
 (`http://mempool_web/api` inside the network) — an officially supported arkd explorer backend.
@@ -79,6 +80,7 @@ Services are grouped into compose profiles so you can bring up just the tier you
 | `boltz`    | boltz, boltz-fulmine, boltz-lnd, nginx-boltz, lnurl-server        | `ark`             |
 | `emulator` | emulator                                                          | `ark`             |
 | `solver`   | solver, pricefeed                                                 | `ark`, `emulator` |
+| `sync`     | bucket-sync, bucket-sync-initdb                                   | `base`            |
 
 ```bash
 node regtest.mjs start                      # full stack (all profiles)
@@ -86,6 +88,7 @@ node regtest.mjs start --profile base       # just the chain + explorer/indexer
 node regtest.mjs start --profile ark        # base + ark (incl. web wallet + explorer)
 node regtest.mjs start --profile boltz      # base + ark + boltz (incl. boltz-fulmine)
 node regtest.mjs start --profile solver     # base + ark + emulator + solver
+node regtest.mjs start --profile sync       # base + bucket sync server (no arkd)
 node regtest.mjs start --profile emulator --profile boltz   # combine targets
 ```
 
@@ -174,6 +177,30 @@ The [arkade-os/emulator](https://github.com/arkade-os/emulator) runs **by defaul
 EMULATOR_IMAGE=
 ```
 
+### Bucket sync server (encrypted backup / restore / sync)
+
+The [bucket-sync-server](https://github.com/Kukks/bucket-sync-server) runs in the `sync` profile at `http://localhost:${BUCKET_SYNC_PORT}` (default `7100`). It's a schema-agnostic, end-to-end-encrypted key/value **bucket** store: clients encrypt before they upload, so the server only ever holds opaque ciphertext. That means it has no Ark dependency — `sync` resolves to `base` alone, and `--profile sync` gives you the chain plus a sync server without booting arkd.
+
+Point a client at it with the URL its SDKs expect:
+
+```bash
+BUCKET_SYNC_URL=http://localhost:7100
+```
+
+It gets its own database (`BUCKET_SYNC_DB`, default `bucketsync`) on the shared `postgres`, created on `start` by the one-shot `bucket-sync-initdb` container; the server applies its own migrations at boot. Buckets therefore survive `stop`/`start`, and `clean` discards them with the rest of the volumes. Pin a different build in your override file:
+
+```bash
+BUCKET_SYNC_IMAGE=ghcr.io/kukks/bucket-sync-server:latest
+```
+
+`:latest` is a mutable tag, so Docker will keep using an older copy you already have cached rather than re-pulling (true of the other `:latest` images here too). Refresh it explicitly when you need the current server, or pin a `sha-<commit>` tag in your override file:
+
+```bash
+docker compose -f docker/compose.base.yml -f docker/compose.ark.yml pull bucket-sync
+```
+
+> **No CORS headers.** The server doesn't send any, so it's reachable from Node/CLI clients and server-side code but not from browser JavaScript on another origin. Put a proxy in front of it (as `nginx-boltz` does for Boltz) if you need browser access.
+
 ## Service URLs
 
 | Service            | URL / endpoint                         | Default port |
@@ -183,7 +210,7 @@ EMULATOR_IMAGE=
 | Esplora REST API   | `http://localhost:3000/api`            | 3000         |
 | Fulcrum (Electrum) | `localhost:50001` (TCP), `localhost:50003` (WS) | 50001 / 50003 |
 | NBXplorer          | `http://localhost:32838`               | 32838        |
-| Postgres           | `localhost:39372` (trust; DBs: arkd, nbxplorer) | 39372 |
+| Postgres           | `localhost:39372` (trust; DBs: arkd, nbxplorer, bucketsync) | 39372 |
 | Arkd               | `http://localhost:7070` (admin `7071`) | 7070         |
 | Arkd Wallet        | `http://localhost:6060`                | 6060         |
 | Fulmine API        | `http://localhost:7003`                | 7003         |
@@ -197,6 +224,7 @@ EMULATOR_IMAGE=
 | Solver HTTP        | `http://localhost:7091`                | 7091         |
 | Solver gRPC        | `localhost:7090`                       | 7090         |
 | Pricefeed          | `http://localhost:8088`                | 8088         |
+| Bucket sync server | `http://localhost:7100`                | 7100         |
 
 ## Using as a git submodule
 
