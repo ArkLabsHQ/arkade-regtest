@@ -367,7 +367,7 @@ services:
 
   # ── Emulator (arkade-script signing service) — profile-gated, started last ──
   emulator:
-    image: ${EMULATOR_IMAGE:-ghcr.io/arkade-os/emulator:v0.0.3}
+    image: ${EMULATOR_IMAGE:-ghcr.io/arkade-os/emulator:v0.0.6}
     container_name: emulator
     restart: unless-stopped
     profiles:
