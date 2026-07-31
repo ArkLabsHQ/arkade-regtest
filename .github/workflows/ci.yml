@@ -66,6 +66,9 @@ jobs:
           curl -sf -X POST http://localhost:7100/v1/auth/schnorr/challenge | jq -e '.nonce != null'
           # bucket-sync-initdb created the database and the server migrated into it.
           test "$(docker exec postgres psql -U postgres -d bucketsync -tAc 'SELECT count(*) FROM schema_migrations')" -gt 0
+          # CORS is on by default here so browser clients work without a proxy.
+          curl -sf -o /dev/null -D - -H 'Origin: http://localhost:3003' http://localhost:7100/health \
+            | grep -qi '^access-control-allow-origin:'
 
           echo "== ark client CLI (initialized + funded) =="
           docker exec arkd ark balance | jq -e '.offchain_balance.total > 0'

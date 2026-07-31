@@ -199,7 +199,14 @@ BUCKET_SYNC_IMAGE=ghcr.io/kukks/bucket-sync-server:latest
 docker compose -f docker/compose.base.yml -f docker/compose.ark.yml pull bucket-sync
 ```
 
-> **No CORS headers.** The server doesn't send any, so it's reachable from Node/CLI clients and server-side code but not from browser JavaScript on another origin. Put a proxy in front of it (as `nginx-boltz` does for Boltz) if you need browser access.
+Browser clients can call it directly. The stack passes `BUCKET_SYNC_CORS` through as the server's `Cors__AllowedOrigins`, defaulting to `*` since this is a local dev environment — so a page on `http://localhost:3003` (or a Vite dev server on any port) can reach it without a proxy. Narrow it to a comma-separated origin list, or clear it to send no CORS headers at all:
+
+```bash
+BUCKET_SYNC_CORS=http://localhost:5173   # only this origin
+BUCKET_SYNC_CORS=                        # no CORS headers
+```
+
+Credentials are never enabled server-side — clients authenticate with an explicit `Authorization` header rather than cookies — so a wildcard origin stays legal, and preflight accepts `Authorization` and SSE's `Last-Event-ID`. A `BUCKET_SYNC_IMAGE` pinned to a build older than this setting simply ignores it and sends no CORS headers.
 
 ## Service URLs
 
