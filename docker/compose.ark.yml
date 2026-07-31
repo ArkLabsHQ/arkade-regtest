@@ -131,7 +131,7 @@ services:
 
   # ── Fulmine (Ark wallet daemon, Boltz-integrated) ──────────────────────────
   boltz-fulmine:
-    image: ${FULMINE_IMAGE:-ghcr.io/arklabshq/fulmine:v0.4.0-rc.1}
+    image: ${FULMINE_IMAGE:-ghcr.io/arklabshq/fulmine:v0.4.0-rc.4}
     container_name: boltz-fulmine
     profiles: ['boltz']
     environment:
@@ -152,7 +152,7 @@ services:
     restart: unless-stopped
 
   fulmine-delegator:
-    image: ${FULMINE_IMAGE:-ghcr.io/arklabshq/fulmine:v0.3.25}
+    image: ${FULMINE_IMAGE:-ghcr.io/arklabshq/fulmine:v0.4.0-rc.4}
     container_name: fulmine-delegator
     profiles: ['delegate']
     environment:
@@ -176,7 +176,7 @@ services:
 
   # ── Boltz (swap server) ────────────────────────────────────────────────────
   boltz:
-    image: ${BOLTZ_IMAGE:-boltz/boltz:latest}
+    image: ${BOLTZ_IMAGE:-altaf4n/boltz:fulmine-v4-support}
     container_name: boltz
     profiles: ['boltz']
     restart: unless-stopped
