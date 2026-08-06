@@ -1,5 +1,5 @@
 # Application layer for arkade-regtest — the Ark stack plus adjacent services
-# that ride on the same base (currently the bucket sync server).
+# that ride on the same base (the bucket sync server, the strfry Nostr relay).
 #
 # Layered on top of docker/compose.base.yml in the same `docker compose -f base
 # -f ark` invocation, so it shares the base project's network. Every service is
@@ -514,6 +514,35 @@ services:
     ports:
       - '${BUCKET_SYNC_PORT:-7100}:8080'
 
+  # ── strfry (Nostr relay) — profile `nostr` ─────────────────────────────────
+  # A plain Nostr relay: it stores and forwards signed events and knows nothing
+  # about Ark, so the `nostr` profile resolves to `base` alone. Here for
+  # services that reach each other over a relay instead of an inbound port —
+  # e.g. the lightning swap provider's RFQ traffic.
+  #
+  # Config is a file, not env vars (strfry reads exactly one .conf), so
+  # docker/strfry.conf is mounted over the image's default: it binds 0.0.0.0
+  # instead of loopback and turns NIP-42 auth off. The LMDB database lives in a
+  # named volume, so events survive `stop`/`start` and `clean` drops them.
+  strfry:
+    image: ${STRFRY_IMAGE:-ghcr.io/hoytech/strfry:latest}
+    container_name: strfry
+    profiles: ['nostr']
+    restart: unless-stopped
+    command: ['relay']
+    volumes:
+      - ./strfry.conf:/app/strfry.conf:ro
+      - strfry_db:/app/strfry-db
+    ports:
+      - '${STRFRY_PORT:-7777}:7777'
+    # The relay answers plain HTTP on the same port it speaks websocket on
+    # (that's where NIP-11 lives), so busybox wget is enough to prove it's up.
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:7777/']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
 volumes:
   ark_wallet_datadir:
   ark_datadir:
@@ -522,3 +551,4 @@ volumes:
   boltz_fulmine_datadir:
   fulmine_delegator_datadir:
   solver_datadir:
+  strfry_db:
