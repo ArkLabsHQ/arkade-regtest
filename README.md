@@ -226,7 +226,7 @@ The same port answers plain HTTP, which is where the NIP-11 relay document lives
 curl -s -H 'Accept: application/nostr+json' http://localhost:7777/ | jq
 ```
 
-Two settings differ from the image's defaults, both in [`docker/strfry.conf`](docker/strfry.conf): it binds `0.0.0.0` (the default is loopback, unreachable from other containers or the published port), and NIP-42 auth is **off**, so any client can read and write without an AUTH challenge. That's a dev-relay stance — don't copy this config to anything public. strfry takes its whole configuration from that one file, not env vars, so the file is a copy of the image's default with those deltas marked at the top; diff it against a newer image's `/app/strfry.conf` when you bump the image.
+Three settings differ from the image's defaults, all in [`docker/strfry.conf`](docker/strfry.conf): it binds `0.0.0.0` (the default is loopback, unreachable from other containers or the published port); NIP-42 auth is **off**, so any client can read and write without an AUTH challenge — a dev-relay stance, don't copy this config to anything public; and `relay.nofiles` is `0`, meaning leave the OS file-descriptor limit alone. Upstream's `524288` is fatal, not a warning, wherever the container's `RLIMIT_NOFILE` hard limit is lower — GitHub runners cap it at 65536 — and strfry exits 1 on boot. strfry takes its whole configuration from that one file, not env vars, so the file is a copy of the image's default with those deltas marked at the top; diff it against a newer image's `/app/strfry.conf` when you bump the image.
 
 Events live in an LMDB database in the `strfry_db` volume, so they survive `stop`/`start` and `clean` drops them with everything else. Upstream publishes only a mutable `latest` tag, so Docker keeps using whatever copy you already cached — refresh or pin it explicitly:
 
@@ -235,7 +235,7 @@ docker compose -f docker/compose.base.yml -f docker/compose.ark.yml pull strfry
 STRFRY_IMAGE=ghcr.io/hoytech/strfry@sha256:<digest>   # in your override file
 ```
 
-> **Relay clients must speak Nostr.** The relay only accepts NIP-01 frames (`["EVENT", …]`, `["REQ", …]`, `["CLOSE", …]`) carrying schnorr-signed events. A client using its own JSON framing over the same websocket — including `lightning-swap-service`'s current dev-broker codec in `src/relay/connection.ts` — will connect and then have every frame rejected until its `encodeFrame`/`decodeFrame` pair is swapped for the Nostr one.
+> **Relay clients must speak Nostr.** The relay only accepts NIP-01 frames (`["EVENT", …]`, `["REQ", …]`, `["CLOSE", …]`) carrying schnorr-signed events. A client using its own JSON framing over the same websocket will connect and then have every frame silently dropped. `lightning-swap-service` ships both dialects behind one codec seam and defaults to Nostr, so point it here with `RELAY_PROTOCOL=nostr RELAY_URL=ws://localhost:7777`; its `dev` framing is for its own mock relay, not for this one.
 
 ## Service URLs
 
