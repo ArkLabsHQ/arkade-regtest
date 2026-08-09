@@ -1,6 +1,6 @@
 # arkade-regtest
 
-A self-contained, cross-platform regtest environment for Ark protocol development. It orchestrates Bitcoin Core, Fulcrum, mempool, NBXplorer, arkd, Fulmine, Boltz, an LND node, and an end-to-end-encrypted bucket sync server into a single reproducible Docker Compose stack — driven by a small zero-dependency Node CLI.
+A self-contained, cross-platform regtest environment for Ark protocol development. It orchestrates Bitcoin Core, Fulcrum, mempool, NBXplorer, arkd, Fulmine, Boltz, an LND node, an end-to-end-encrypted bucket sync server, and a strfry Nostr relay into a single reproducible Docker Compose stack — driven by a small zero-dependency Node CLI.
 
 There is **no dependency on nigiri** and **no compiled binary** to maintain: everything is standard Docker images plus a Node orchestrator. It runs the same on Linux, macOS, and Windows (no WSL required).
 
@@ -60,8 +60,8 @@ Two compose files are merged into one project (`arkade-regtest`):
   `mempool_api` + `mempool_web` + `mempool_mariadb` (block explorer & Esplora REST API), and `lnd`.
 - **`docker/compose.ark.yml`** — the Ark stack: `arkd` + `arkd-wallet`, `boltz`, `boltz-lnd`,
   `boltz-fulmine`, `fulmine-delegator`, `nginx-boltz`, `lnurl-server`, `arkade-wallet`, and the
-  profile-gated `emulator` — plus `bucket-sync` (and its one-shot `bucket-sync-initdb`), which
-  rides on the same base but has no Ark dependency of its own.
+  profile-gated `emulator` — plus `bucket-sync` (and its one-shot `bucket-sync-initdb`) and
+  `strfry`, which ride on the same base but have no Ark dependency of their own.
 
 arkd and Fulmine consume the **Esplora-compatible REST API that mempool serves under `/api`**
 (`http://mempool_web/api` inside the network) — an officially supported arkd explorer backend.
@@ -81,6 +81,7 @@ Services are grouped into compose profiles so you can bring up just the tier you
 | `emulator` | emulator                                                          | `ark`             |
 | `solver`   | solver, pricefeed                                                 | `ark`, `emulator` |
 | `sync`     | bucket-sync, bucket-sync-initdb                                   | `base`            |
+| `nostr`    | strfry                                                            | `base`            |
 
 ```bash
 node regtest.mjs start                      # full stack (all profiles)
@@ -89,6 +90,7 @@ node regtest.mjs start --profile ark        # base + ark (incl. web wallet + exp
 node regtest.mjs start --profile boltz      # base + ark + boltz (incl. boltz-fulmine)
 node regtest.mjs start --profile solver     # base + ark + emulator + solver
 node regtest.mjs start --profile sync       # base + bucket sync server (no arkd)
+node regtest.mjs start --profile nostr      # base + strfry Nostr relay (no arkd)
 node regtest.mjs start --profile emulator --profile boltz   # combine targets
 ```
 
@@ -208,6 +210,33 @@ BUCKET_SYNC_CORS=                        # no CORS headers
 
 Credentials are never enabled server-side — clients authenticate with an explicit `Authorization` header rather than cookies — so a wildcard origin stays legal, and preflight accepts `Authorization` and SSE's `Last-Event-ID`. A `BUCKET_SYNC_IMAGE` pinned to a build older than this setting simply ignores it and sends no CORS headers.
 
+### strfry (Nostr relay)
+
+[strfry](https://github.com/hoytech/strfry) runs in the `nostr` profile at `ws://localhost:${STRFRY_PORT}` (default `7777`). It's a plain relay: it stores and forwards signed Nostr events and knows nothing about Ark, so `nostr` resolves to `base` alone and `--profile nostr` gives you the chain plus a relay without booting arkd. It's here for services that reach each other over a relay instead of an inbound port — a provider that publishes nothing but connects out, and clients that address it by pubkey.
+
+Point a client at it:
+
+```bash
+RELAY_URL=ws://localhost:7777
+```
+
+The same port answers plain HTTP, which is where the NIP-11 relay document lives — handy as a liveness check without a websocket client:
+
+```bash
+curl -s -H 'Accept: application/nostr+json' http://localhost:7777/ | jq
+```
+
+Three settings differ from the image's defaults, all in [`docker/strfry.conf`](docker/strfry.conf): it binds `0.0.0.0` (the default is loopback, unreachable from other containers or the published port); NIP-42 auth is **off**, so any client can read and write without an AUTH challenge — a dev-relay stance, don't copy this config to anything public; and `relay.nofiles` is `0`, meaning leave the OS file-descriptor limit alone. Upstream's `524288` is fatal, not a warning, wherever the container's `RLIMIT_NOFILE` hard limit is lower — GitHub runners cap it at 65536 — and strfry exits 1 on boot. strfry takes its whole configuration from that one file, not env vars, so the file is a copy of the image's default with those deltas marked at the top; diff it against a newer image's `/app/strfry.conf` when you bump the image.
+
+Events live in an LMDB database in the `strfry_db` volume, so they survive `stop`/`start` and `clean` drops them with everything else. Upstream publishes only a mutable `latest` tag, so Docker keeps using whatever copy you already cached — refresh or pin it explicitly:
+
+```bash
+docker compose -f docker/compose.base.yml -f docker/compose.ark.yml pull strfry
+STRFRY_IMAGE=ghcr.io/hoytech/strfry@sha256:<digest>   # in your override file
+```
+
+> **Relay clients must speak Nostr.** The relay only accepts NIP-01 frames (`["EVENT", …]`, `["REQ", …]`, `["CLOSE", …]`) carrying schnorr-signed events. A client using its own JSON framing over the same websocket will connect and then have every frame silently dropped. `lightning-swap-service` ships both dialects behind one codec seam and defaults to Nostr, so point it here with `RELAY_PROTOCOL=nostr RELAY_URL=ws://localhost:7777`; its `dev` framing is for its own mock relay, not for this one.
+
 ## Service URLs
 
 | Service            | URL / endpoint                         | Default port |
@@ -232,6 +261,7 @@ Credentials are never enabled server-side — clients authenticate with an expli
 | Solver gRPC        | `localhost:7090`                       | 7090         |
 | Pricefeed          | `http://localhost:8088`                | 8088         |
 | Bucket sync server | `http://localhost:7100`                | 7100         |
+| strfry (Nostr)     | `ws://localhost:7777` (NIP-11 over `http://`) | 7777  |
 
 ## Using as a git submodule
 

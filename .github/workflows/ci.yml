@@ -70,6 +70,26 @@ jobs:
           curl -sf -o /dev/null -D - -H 'Origin: http://localhost:3003' http://localhost:7100/health \
             | grep -qi '^access-control-allow-origin:'
 
+          echo "== strfry (Nostr relay) =="
+          # NIP-11 over plain HTTP proves docker/strfry.conf was picked up (name)
+          # and that NIP-42 auth is off (42 absent from the advertised NIPs).
+          curl -sf -H 'Accept: application/nostr+json' http://localhost:7777/ \
+            | jq -e '.name == "arkade-regtest" and (.supported_nips | index(42) | not)'
+          # A real websocket round trip — REQ in, EOSE back — so this covers the
+          # query path and not just an open port. Node 20 needs the flag for a
+          # WebSocket client; it's global from 22 on, where the flag is a no-op.
+          node --experimental-websocket -e '
+            const ws = new WebSocket("ws://localhost:7777");
+            const timer = setTimeout(() => { console.error("no EOSE from strfry"); process.exit(1); }, 15000);
+            ws.onopen = () => ws.send(JSON.stringify(["REQ", "ci-probe", { limit: 1 }]));
+            ws.onmessage = (m) => {
+              if (JSON.parse(m.data)[0] !== "EOSE") return;
+              clearTimeout(timer);
+              ws.close();
+              process.exit(0);
+            };
+          '
+
           echo "== ark client CLI (initialized + funded) =="
           docker exec arkd ark balance | jq -e '.offchain_balance.total > 0'
 
@@ -151,7 +171,7 @@ jobs:
         if: failure()
         run: |
           docker compose -f docker/compose.base.yml -f docker/compose.ark.yml ps || true
-          for c in bitcoin fulcrum mempool_api mempool_web nbxplorer arkd-wallet arkd arkade-wallet arkade-explorer boltz boltz-lnd boltz-fulmine emulator solver bucket-sync-initdb bucket-sync; do
+          for c in bitcoin fulcrum mempool_api mempool_web nbxplorer arkd-wallet arkd arkade-wallet arkade-explorer boltz boltz-lnd boltz-fulmine emulator solver bucket-sync-initdb bucket-sync strfry; do
             echo "===== logs: $c ====="
             docker logs --tail 80 "$c" 2>&1 || true
           done

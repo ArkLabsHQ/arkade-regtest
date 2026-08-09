@@ -13,8 +13,9 @@
 //
 // Profiles (and their dependencies) let you bring up a subset of the stack:
 //   ark → base,  delegate → ark,  boltz → ark,  emulator → ark,
-//   solver → ark + emulator,  sync → base. `--profile boltz` brings up
-//   base+ark+boltz; `--profile sync` skips the Ark stack entirely.
+//   solver → ark + emulator,  sync → base,  nostr → base. `--profile boltz`
+//   brings up base+ark+boltz; `--profile sync` / `--profile nostr` skip the Ark
+//   stack entirely.
 //   Selection precedence: --profile flags > REGTEST_PROFILES env (comma-list)
 //   > full stack.
 //
@@ -43,6 +44,7 @@ const PROFILE_DEPS = {
   covclaimd: ['ark', 'emulator'], // non-interactive claim daemon; needs arkd + emulator
   solver: ['ark', 'emulator'],
   sync: ['base'], // bucket-sync-server — opaque key/value store, no Ark dependency
+  nostr: ['base'], // strfry — a Nostr relay; stores signed events, no Ark dependency
 };
 
 function resolveProfiles(requested) {
@@ -132,6 +134,18 @@ async function waitForBucketSync() {
   log(`Bucket sync up at http://localhost:${port} (Postgres DB: ${env('BUCKET_SYNC_DB', 'bucketsync')})`);
 }
 
+// strfry needs no post-boot setup — clients publish and subscribe on their own
+// keys — so this only waits until it answers. It's polled over HTTP rather than
+// a websocket: the relay serves its NIP-11 document on the same port, which
+// keeps this on Node 18's fetch instead of a websocket client we'd have to ship.
+async function waitForStrfry() {
+  const port = env('STRFRY_PORT', '7777');
+  const nip11 = () => fetchJson(`http://localhost:${port}/`, { headers: { Accept: 'application/nostr+json' } });
+  await waitForOrFail('strfry NIP-11 document', async () => (await nip11()).json?.name != null);
+  const { json } = await nip11();
+  log(`strfry up at ws://localhost:${port} (strfry ${json?.version || '?'}, NIPs: ${(json?.supported_nips || []).join(',')})`);
+}
+
 function banner(active) {
   const lines = [
     '',
@@ -172,6 +186,9 @@ function banner(active) {
   }
   if (active.has('sync')) {
     lines.push(`  Bucket Sync     http://localhost:${env('BUCKET_SYNC_PORT', '7100')}  (DB: ${env('BUCKET_SYNC_DB', 'bucketsync')})`);
+  }
+  if (active.has('nostr')) {
+    lines.push(`  Nostr relay     ws://localhost:${env('STRFRY_PORT', '7777')}  (strfry; NIP-11 over http://)`);
   }
   lines.push(
     '',
@@ -244,6 +261,7 @@ async function start(opts) {
   // Only depends on `base`, so it is ready earliest — check it before arkd's
   // slow setup, so a bad image or unreachable database fails fast.
   if (active.has('sync')) await waitForBucketSync();
+  if (active.has('nostr')) await waitForStrfry();
 
   if (active.has('ark')) await setupArkd();
   if (active.has('delegate')) await setupDelegator();
