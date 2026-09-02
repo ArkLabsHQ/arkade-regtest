@@ -13,9 +13,9 @@
 //
 // Profiles (and their dependencies) let you bring up a subset of the stack:
 //   ark → base,  delegate → ark,  boltz → ark,  emulator → ark,
-//   solver → ark + emulator,  sync → base,  nostr → base. `--profile boltz`
-//   brings up base+ark+boltz; `--profile sync` / `--profile nostr` skip the Ark
-//   stack entirely.
+//   solver → ark + emulator,  intent-solver → ark + emulator + boltz,
+//   sync → base,  nostr → base. `--profile boltz` brings up base+ark+boltz;
+//   `--profile sync` / `--profile nostr` skip the Ark stack entirely.
 //   Selection precedence: --profile flags > REGTEST_PROFILES env (comma-list)
 //   > full stack.
 //
@@ -43,6 +43,11 @@ const PROFILE_DEPS = {
   emulator: ['ark'],
   covclaimd: ['ark', 'emulator'], // non-interactive claim daemon; needs arkd + emulator
   solver: ['ark', 'emulator'],
+  // arkade-os/intent-solver — the Lightning <-> Arkade swap solver, backed by
+  // the base `lnd`. `boltz` is not optional here: its setup is the only thing
+  // that funds that node and opens a channel to it, so without it every
+  // Lightning corridor is dead on arrival.
+  'intent-solver': ['ark', 'emulator', 'boltz'],
   sync: ['base'], // bucket-sync-server — opaque key/value store, no Ark dependency
   nostr: ['base'], // strfry — a Nostr relay; stores signed events, no Ark dependency
 };
@@ -123,6 +128,25 @@ async function startCovclaimd() {
   log(`covclaimd up at http://localhost:${port} (reveal enabled)`);
 }
 
+// The swap solver, started last of the app tiers: its Lightning side is the
+// base `lnd`, which only has a funded, balanced channel once setupBoltz() has
+// run. `serve` answers /healthz, so that — not a bare open port — is what
+// readiness is measured on.
+async function startIntentSolver() {
+  if (!env('INTENT_SOLVER_IMAGE')) {
+    log('intent-solver disabled (INTENT_SOLVER_IMAGE empty), skipping...');
+    return;
+  }
+  const port = env('INTENT_SOLVER_PORT', '8787');
+  log(`Starting intent-solver overlay (${env('INTENT_SOLVER_IMAGE')})...`);
+  composeUp(['intent-solver'], { profiles: ['intent-solver'] });
+  await waitForOrFail('intent-solver /healthz', () => httpOk(`http://localhost:${port}/healthz`), {
+    attempts: 45,
+    intervalMs: 2000,
+  });
+  log(`intent-solver up at http://localhost:${port} (LN backend: lnd)`);
+}
+
 // The bucket sync server needs no post-boot setup — clients create their own
 // buckets on demand — so this only waits until it answers, and the banner never
 // advertises a port that isn't serving yet. Its image carries no curl/wget (it's
@@ -184,6 +208,9 @@ function banner(active) {
     lines.push(`  Solver HTTP     http://localhost:${env('SOLVER_HTTP_PORT', '7091')}`);
     lines.push(`  Solver gRPC     localhost:${env('SOLVER_GRPC_PORT', '7090')}`);
   }
+  if (active.has('intent-solver')) {
+    lines.push(`  Intent solver   http://localhost:${env('INTENT_SOLVER_PORT', '8787')}  (swap solver; LN backend: lnd)`);
+  }
   if (active.has('sync')) {
     lines.push(`  Bucket Sync     http://localhost:${env('BUCKET_SYNC_PORT', '7100')}  (DB: ${env('BUCKET_SYNC_DB', 'bucketsync')})`);
   }
@@ -219,11 +246,19 @@ async function start(opts) {
     if (active.delete('emulator')) log('Emulator disabled (EMULATOR_IMAGE empty)');
     if (active.delete('solver')) warn('Solver needs the emulator; skipping it (EMULATOR_IMAGE is empty)');
     if (active.delete('covclaimd')) warn('covclaimd needs the emulator; skipping it (EMULATOR_IMAGE is empty)');
+    if (active.delete('intent-solver')) warn('intent-solver needs the emulator; skipping it (EMULATOR_IMAGE is empty)');
   }
 
   // covclaimd opt-out: clearing COVCLAIMD_IMAGE disables it independently.
   if (!env('COVCLAIMD_IMAGE') && active.delete('covclaimd')) {
     log('covclaimd disabled (COVCLAIMD_IMAGE empty)');
+  }
+
+  // intent-solver opt-out: same idiom, but empty is the DEFAULT here — the
+  // image is not published yet, so the profile stays off (full stack included)
+  // until an override names a build. Nothing else in the stack depends on it.
+  if (!env('INTENT_SOLVER_IMAGE') && active.delete('intent-solver')) {
+    log('intent-solver disabled (INTENT_SOLVER_IMAGE empty; set it to enable the profile)');
   }
 
   const profiles = [...active];
@@ -272,6 +307,7 @@ async function start(opts) {
   if (active.has('emulator')) await startEmulator();
   if (active.has('covclaimd')) await startCovclaimd();
   if (active.has('solver')) await setupSolver();
+  if (active.has('intent-solver')) await startIntentSolver();
   // Apply the configured arkd intent fees last — every wallet above settles/
   // redeems with fees zeroed, so this must run after all of them.
   if (active.has('ark')) await applyArkdFees();

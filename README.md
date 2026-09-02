@@ -60,8 +60,9 @@ Two compose files are merged into one project (`arkade-regtest`):
   `mempool_api` + `mempool_web` + `mempool_mariadb` (block explorer & Esplora REST API), and `lnd`.
 - **`docker/compose.ark.yml`** — the Ark stack: `arkd` + `arkd-wallet`, `boltz`, `boltz-lnd`,
   `boltz-fulmine`, `fulmine-delegator`, `nginx-boltz`, `lnurl-server`, `arkade-wallet`, and the
-  profile-gated `emulator` — plus `bucket-sync` (and its one-shot `bucket-sync-initdb`) and
-  `strfry`, which ride on the same base but have no Ark dependency of their own.
+  profile-gated `emulator` and `intent-solver` — plus `bucket-sync` (and its one-shot
+  `bucket-sync-initdb`) and `strfry`, which ride on the same base but have no Ark dependency of
+  their own.
 
 arkd and Fulmine consume the **Esplora-compatible REST API that mempool serves under `/api`**
 (`http://mempool_web/api` inside the network) — an officially supported arkd explorer backend.
@@ -72,16 +73,17 @@ Bitcoin Core and the counterparty LND node use the BTCPay images, so their confi
 
 Services are grouped into compose profiles so you can bring up just the tier you need. The CLI resolves the dependency closure automatically:
 
-| Profile    | Services                                                          | Depends on        |
-| ---------- | ----------------------------------------------------------------- | ----------------- |
-| `base`     | bitcoin, postgres, nbxplorer, fulcrum, mempool (api/web/db), lnd  | —                 |
-| `ark`      | arkd, arkd-wallet, arkade-wallet, arkade-explorer                 | `base`            |
-| `delegate` | fulmine-delegator                                                 | `ark`             |
-| `boltz`    | boltz, boltz-fulmine, boltz-lnd, nginx-boltz, lnurl-server        | `ark`             |
-| `emulator` | emulator                                                          | `ark`             |
-| `solver`   | solver, pricefeed                                                 | `ark`, `emulator` |
-| `sync`     | bucket-sync, bucket-sync-initdb                                   | `base`            |
-| `nostr`    | strfry                                                            | `base`            |
+| Profile         | Services                                                          | Depends on                 |
+| --------------- | ----------------------------------------------------------------- | -------------------------- |
+| `base`          | bitcoin, postgres, nbxplorer, fulcrum, mempool (api/web/db), lnd  | —                          |
+| `ark`           | arkd, arkd-wallet, arkade-wallet, arkade-explorer                 | `base`                     |
+| `delegate`      | fulmine-delegator                                                 | `ark`                      |
+| `boltz`         | boltz, boltz-fulmine, boltz-lnd, nginx-boltz, lnurl-server        | `ark`                      |
+| `emulator`      | emulator                                                          | `ark`                      |
+| `solver`        | solver, pricefeed                                                 | `ark`, `emulator`          |
+| `intent-solver` | intent-solver                                                     | `ark`, `emulator`, `boltz` |
+| `sync`          | bucket-sync, bucket-sync-initdb                                   | `base`                     |
+| `nostr`         | strfry                                                            | `base`                     |
 
 ```bash
 node regtest.mjs start                      # full stack (all profiles)
@@ -89,6 +91,7 @@ node regtest.mjs start --profile base       # just the chain + explorer/indexer
 node regtest.mjs start --profile ark        # base + ark (incl. web wallet + explorer)
 node regtest.mjs start --profile boltz      # base + ark + boltz (incl. boltz-fulmine)
 node regtest.mjs start --profile solver     # base + ark + emulator + solver
+node regtest.mjs start --profile intent-solver   # base + ark + emulator + boltz + the swap solver
 node regtest.mjs start --profile sync       # base + bucket sync server (no arkd)
 node regtest.mjs start --profile nostr      # base + strfry Nostr relay (no arkd)
 node regtest.mjs start --profile emulator --profile boltz   # combine targets
@@ -179,6 +182,32 @@ The [arkade-os/emulator](https://github.com/arkade-os/emulator) runs **by defaul
 EMULATOR_IMAGE=
 ```
 
+### Intent solver (Lightning <-> Arkade swaps)
+
+[arkade-os/intent-solver](https://github.com/arkade-os/intent-solver) is the reference swap solver: it quotes and settles Lightning <-> Arkade swaps against a real LND node. It is **not** the `solver` service — that one is solverd, the virtual-mempool intent solver. Two different daemons under two different profiles.
+
+It runs in the `intent-solver` profile at `http://localhost:${INTENT_SOLVER_PORT}` (default `8787`), started last so its dependencies are ready. That profile resolves to `ark`, `emulator` **and `boltz`** — boltz is not optional here: its setup is the only thing in this repo that funds the base `lnd` node and opens a channel to it, so without it every Lightning corridor would be dead on arrival. The solver reuses that node rather than adding a second funding path (`lnd:10009`, with the cert and admin macaroon read straight off the `lnd_datadir` volume).
+
+The profile is **off by default**, because the image is not published yet. Name a build in your override file to turn it on:
+
+```bash
+INTENT_SOLVER_IMAGE=ghcr.io/arkade-os/intent-solver:v0.1.0
+```
+
+Until then `start` logs `intent-solver disabled (INTENT_SOLVER_IMAGE empty; set it to enable the profile)` and skips it — including in the full-stack default — the same "clear the image to disable it" idiom as `EMULATOR_IMAGE`, in reverse.
+
+It runs the image's `serve` command (an HTTP host) rather than its default `relay` (outbound-only, no port), bound to `0.0.0.0` so the published port is reachable. Liveness is `/healthz`:
+
+```bash
+curl -s http://localhost:8787/healthz    # {"ok":true,"network":"regtest"}
+```
+
+Its Arkade wallet is derived from `INTENT_SOLVER_MNEMONIC`, fixed in `.env.defaults` so the solver's address is stable across restarts. That phrase is public — regtest only. Its databases live in the `intent_solver_datadir` volume, so swaps survive `stop`/`start` and `clean` drops them with everything else.
+
+> **The container runs as root, on purpose.** lnd's admin macaroon is `0640 root:root` behind `0700` directories, and the image's own user (`node`) cannot read it. The volume is mounted read-only. This is a regtest convenience — don't copy it to a deployment.
+
+> **Known gap: the Arkade side has no explorer knob.** `LND_ESPLORA_URL` points the Lightning side at mempool, but the Arkade side falls back to the SDK's regtest default `http://localhost:3000/api` — which, inside the container, is the container. The solver logs `Failed to fetch chain tip; height-based expiry will not be evaluated` and keeps serving, so this stack's block-denominated VTXO expiry goes unwatched. It needs an env knob in the solver itself; nothing in this repo can supply one.
+
 ### Bucket sync server (encrypted backup / restore / sync)
 
 The [bucket-sync-server](https://github.com/Kukks/bucket-sync-server) runs in the `sync` profile at `http://localhost:${BUCKET_SYNC_PORT}` (default `7100`). It's a schema-agnostic, end-to-end-encrypted key/value **bucket** store: clients encrypt before they upload, so the server only ever holds opaque ciphertext. That means it has no Ark dependency — `sync` resolves to `base` alone, and `--profile sync` gives you the chain plus a sync server without booting arkd.
@@ -260,6 +289,7 @@ STRFRY_IMAGE=ghcr.io/hoytech/strfry@sha256:<digest>   # in your override file
 | Solver HTTP        | `http://localhost:7091`                | 7091         |
 | Solver gRPC        | `localhost:7090`                       | 7090         |
 | Pricefeed          | `http://localhost:8088`                | 8088         |
+| Intent solver      | `http://localhost:8787` (`/healthz`)   | 8787         |
 | Bucket sync server | `http://localhost:7100`                | 7100         |
 | strfry (Nostr)     | `ws://localhost:7777` (NIP-11 over `http://`) | 7777  |
 
