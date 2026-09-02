@@ -81,7 +81,7 @@ Services are grouped into compose profiles so you can bring up just the tier you
 | `boltz`         | boltz, boltz-fulmine, boltz-lnd, nginx-boltz, lnurl-server        | `ark`                      |
 | `emulator`      | emulator                                                          | `ark`                      |
 | `solver`        | solver, pricefeed                                                 | `ark`, `emulator`          |
-| `intent-solver` | intent-solver                                                     | `ark`, `emulator`, `boltz` |
+| `intent-solver` | intent-solver                                                     | `ark`, `emulator`, `boltz`, `nostr` |
 | `sync`          | bucket-sync, bucket-sync-initdb                                   | `base`                     |
 | `nostr`         | strfry                                                            | `base`                     |
 
@@ -91,7 +91,7 @@ node regtest.mjs start --profile base       # just the chain + explorer/indexer
 node regtest.mjs start --profile ark        # base + ark (incl. web wallet + explorer)
 node regtest.mjs start --profile boltz      # base + ark + boltz (incl. boltz-fulmine)
 node regtest.mjs start --profile solver     # base + ark + emulator + solver
-node regtest.mjs start --profile intent-solver   # base + ark + emulator + boltz + the swap solver
+node regtest.mjs start --profile intent-solver   # base + ark + emulator + boltz + nostr + the swap solver
 node regtest.mjs start --profile sync       # base + bucket sync server (no arkd)
 node regtest.mjs start --profile nostr      # base + strfry Nostr relay (no arkd)
 node regtest.mjs start --profile emulator --profile boltz   # combine targets
@@ -206,7 +206,7 @@ Its Arkade wallet is derived from `INTENT_SOLVER_MNEMONIC`, fixed in `.env.defau
 
 > **The container runs as root, on purpose.** lnd's admin macaroon is `0640 root:root` behind `0700` directories, and the image's own user (`node`) cannot read it. The volume is mounted read-only. This is a regtest convenience — don't copy it to a deployment.
 
-> **Known gap: the Arkade side has no explorer knob.** `LND_ESPLORA_URL` points the Lightning side at mempool, but the Arkade side falls back to the SDK's regtest default `http://localhost:3000/api` — which, inside the container, is the container. The solver logs `Failed to fetch chain tip; height-based expiry will not be evaluated` and keeps serving, so this stack's block-denominated VTXO expiry goes unwatched. It needs an env knob in the solver itself; nothing in this repo can supply one.
+> **Two explorers, and both are set.** The two chains are watched by different clients with different defaults, so one knob is not enough. `LND_ESPLORA_URL` points the Lightning side at mempool; `ARK_ESPLORA_URL` points the Arkade wallet there too. Leave the second unset and the SDK falls back to its regtest default `http://localhost:3000/api` — which, inside the container, is the container. The solver then logs `Failed to fetch chain tip; height-based expiry will not be evaluated` once and keeps serving, so the stack reads healthy while block-denominated VTXO expiry goes unwatched. This was a real gap until the knob shipped in [arkade-os/intent-solver@5fd1677](https://github.com/arkade-os/intent-solver/commit/5fd1677); the profile sets it.
 
 ### Bucket sync server (encrypted backup / restore / sync)
 
