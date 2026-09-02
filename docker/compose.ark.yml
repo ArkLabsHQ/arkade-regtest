@@ -501,6 +501,13 @@ services:
       ARK_SERVER_URL: http://arkd:7070
       EMULATOR_URL: http://emulator:7073
       ARK_MNEMONIC: ${INTENT_SOLVER_MNEMONIC}
+      # Where swaps actually arrive. The HTTP surface is `/healthz` and one RFQ
+      # status read — nothing quotes or swaps over it. A trader reaches this
+      # solver by publishing a signed RFQ to the relay, so unset means a
+      # container that passes its healthcheck and can never be traded with.
+      #
+      # `ws://`, not `wss://`: strfry here terminates no TLS.
+      RELAY_URL: ws://strfry:7777
       # Explicit, never inferred: leaving this unset does not mean "no
       # Lightning" — the app falls through to a hosted vendor backend, which
       # would quietly ignore the lnd below and refuse every regtest swap.
@@ -508,18 +515,21 @@ services:
       LND_SOCKET: lnd:10009
       LND_CERT_PATH: /lnd/tls.cert
       LND_MACAROON_PATH: /lnd/data/chain/bitcoin/regtest/admin.macaroon
-      # LND alone cannot see third-party funding or per-output values, so the
-      # onchain corridors need an explorer; mempool serves Esplora under /api.
+      # TWO explorers, because the two chains are watched by different clients
+      # and each defaults badly inside a container. mempool serves an Esplora
+      # API under /api, so one host answers both.
       #
-      # This points the LIGHTNING side's explorer only. The Arkade side has no
-      # equivalent knob yet — the SDK falls back to its own regtest default,
-      # http://localhost:3000/api, which resolves to the container itself and
-      # not to mempool. The solver logs "Failed to fetch chain tip; height-based
-      # expiry will not be evaluated" and carries on, so this stack's
-      # block-denominated VTXO expiry goes unwatched. Nothing here can fix that;
-      # it needs an env knob in the solver (it would pass one straight through
-      # to the SDK's `Wallet.create({ esploraUrl })`).
+      # The LIGHTNING side: LND's own chain view is wallet-scoped and carries
+      # no per-output values, so the onchain corridors need an explorer to see
+      # a client's funding transaction at all.
       LND_ESPLORA_URL: http://mempool_web/api
+      # The ARKADE side, which is a different client with its own default: the
+      # SDK falls back to http://localhost:3000/api on regtest, and inside this
+      # container that resolves to the container itself. Left unset the solver
+      # logs "Failed to fetch chain tip; height-based expiry will not be
+      # evaluated" ONCE at startup and carries on — so the stack reads healthy
+      # while block-denominated VTXO expiry silently goes unwatched.
+      ARK_ESPLORA_URL: http://mempool_web/api
       HOST: 0.0.0.0
       PORT: '8787'
     ports:

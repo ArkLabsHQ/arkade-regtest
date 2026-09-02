@@ -47,7 +47,13 @@ const PROFILE_DEPS = {
   // the base `lnd`. `boltz` is not optional here: its setup is the only thing
   // that funds that node and opens a channel to it, so without it every
   // Lightning corridor is dead on arrival.
-  'intent-solver': ['ark', 'emulator', 'boltz'],
+  //
+  // `nostr` because the solver advertises a relay on its registry card and a
+  // client may take the outbound path (`examples/send-client-relay.mjs`)
+  // rather than HTTP. Both transports carry the SAME rfq payloads byte for
+  // byte; only the envelope differs, so a stack that offers one and not the
+  // other silently halves what can be tested against it.
+  'intent-solver': ['ark', 'emulator', 'boltz', 'nostr'],
   sync: ['base'], // bucket-sync-server — opaque key/value store, no Ark dependency
   nostr: ['base'], // strfry — a Nostr relay; stores signed events, no Ark dependency
 };
