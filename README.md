@@ -191,7 +191,7 @@ It runs in the `intent-solver` profile at `http://localhost:${INTENT_SOLVER_PORT
 The profile is **off by default**, because the image is not published yet. Name a build in your override file to turn it on:
 
 ```bash
-INTENT_SOLVER_IMAGE=ghcr.io/arkade-os/intent-solver:v0.1.0
+INTENT_SOLVER_IMAGE=ghcr.io/arkade-os/intent-solver:v0.2.0
 ```
 
 Until then `start` logs `intent-solver disabled (INTENT_SOLVER_IMAGE empty; set it to enable the profile)` and skips it — including in the full-stack default — the same "clear the image to disable it" idiom as `EMULATOR_IMAGE`, in reverse.
