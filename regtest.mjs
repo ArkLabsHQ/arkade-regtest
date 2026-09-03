@@ -13,7 +13,7 @@
 //
 // Profiles (and their dependencies) let you bring up a subset of the stack:
 //   ark → base,  delegate → ark,  boltz → ark,  emulator → ark,
-//   solver → ark + emulator,  intent-solver → ark + emulator + boltz,
+//   solver → ark + emulator,  intent-solver → ark + emulator + boltz + nostr,
 //   sync → base,  nostr → base. `--profile boltz` brings up base+ark+boltz;
 //   `--profile sync` / `--profile nostr` skip the Ark stack entirely.
 //   Selection precedence: --profile flags > REGTEST_PROFILES env (comma-list)
