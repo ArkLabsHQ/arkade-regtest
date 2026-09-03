@@ -490,7 +490,7 @@ services:
     # enable every profile, and compose rejects the whole project over a service
     # with no image at all. Correct it here, and drop the empty default in
     # .env.defaults, when the first image ships.
-    image: ${INTENT_SOLVER_IMAGE:-ghcr.io/arkade-os/intent-solver:v0.1.0}
+    image: ${INTENT_SOLVER_IMAGE:-ghcr.io/arkade-os/intent-solver:v0.2.0}
     container_name: intent-solver
     profiles: ['intent-solver']
     restart: unless-stopped
