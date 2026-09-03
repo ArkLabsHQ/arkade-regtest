@@ -48,11 +48,12 @@ const PROFILE_DEPS = {
   // that funds that node and opens a channel to it, so without it every
   // Lightning corridor is dead on arrival.
   //
-  // `nostr` because the solver advertises a relay on its registry card and a
-  // client may take the outbound path (`examples/send-client-relay.mjs`)
-  // rather than HTTP. Both transports carry the SAME rfq payloads byte for
-  // byte; only the envelope differs, so a stack that offers one and not the
-  // other silently halves what can be tested against it.
+  // `nostr` for the solver's registry card, which names a relay a client can
+  // reach it on, and for the ad the admin console can post there. NOT for
+  // swap ingress: under `command: serve` swaps arrive over `POST /v1/swap`
+  // and the process never subscribes to the relay — only `command: relay`
+  // does, and it has no listening swap port. Both transports carry identical
+  // payloads; which one answers is a function of the mode, not the config.
   'intent-solver': ['ark', 'emulator', 'boltz', 'nostr'],
   sync: ['base'], // bucket-sync-server — opaque key/value store, no Ark dependency
   nostr: ['base'], // strfry — a Nostr relay; stores signed events, no Ark dependency

@@ -501,10 +501,23 @@ services:
       ARK_SERVER_URL: http://arkd:7070
       EMULATOR_URL: http://emulator:7073
       ARK_MNEMONIC: ${INTENT_SOLVER_MNEMONIC}
-      # Where swaps actually arrive. The HTTP surface is `/healthz` and one RFQ
-      # status read — nothing quotes or swaps over it. A trader reaches this
-      # solver by publishing a signed RFQ to the relay, so unset means a
-      # container that passes its healthcheck and can never be traded with.
+      # For the REGISTRY CARD, not for swap ingress — the distinction matters
+      # and is easy to get backwards. `command: serve` starts the HTTP swap
+      # API and the money-mover; it does NOT subscribe to a relay. Only
+      # `command: relay` opens the RFQ ingress, and the two are alternatives:
+      # relay mode has no listening swap port.
+      #
+      # Verified rather than assumed: with this set and `serve` running, a
+      # trader publishing a signed RFQ to strfry gets `no reply within
+      # 30000ms`, while the same request over `POST /v1/swap` completes a
+      # swap. Both transports carry identical payloads — the difference is
+      # only which one this process is listening on.
+      #
+      # So what this buys is the card: the solver's published listing names a
+      # relay a client can reach it on, and the admin console can post an ad
+      # there. Swap over HTTP; to exercise the Nostr ingress instead, override
+      # `command` to `relay` and set ADMIN_PORT/ADMIN_HOST for a healthcheck,
+      # since relay mode publishes no HTTP port of its own.
       #
       # `ws://`, not `wss://`: strfry here terminates no TLS.
       RELAY_URL: ws://strfry:7777
