@@ -270,6 +270,16 @@ async function start(opts) {
 
   const profiles = [...active];
   log(`Starting arkade-regtest stack (profiles: ${profiles.join(', ')})...`);
+  
+  // The waves below pass an empty service list, so compose starts EVERY service
+  // in every profile they enable. intent-solver must not be one of them: its
+  // Lightning side is the base `lnd`, which has no funds and no channel until
+  // setupBoltz() has run, and it carries `restart: unless-stopped`, so starting
+  // it here would crash-loop it (or leave it serving against a dead corridor)
+  // for the whole of arkd + boltz setup. startIntentSolver() brings it up on its
+  // own, last, and waits on /healthz. Nothing else depends on it and it declares
+  // no depends_on of its own, so holding its profile back costs nothing.
+  const waveProfiles = profiles.filter((p) => p !== 'intent-solver');
 
   // Stagger startup when the closure is more than just base. Bringing up all
   // ~18 containers at once overwhelms Docker's embedded DNS (arkd <-> arkd-wallet
@@ -279,7 +289,7 @@ async function start(opts) {
   // THEN start the app layer (ark, boltz, ...) against a healthy base.
   const phased = active.has('base') && active.size > 1;
 
-  const firstWave = composeUp([], { profiles: phased ? ['base'] : profiles });
+  const firstWave = composeUp([], { profiles: phased ? ['base'] : waveProfiles });
   if (firstWave.code !== 0) fail('docker compose up failed');
 
   // base (always in any closure): wait for bitcoind RPC, fund the node wallet,
@@ -296,7 +306,7 @@ async function start(opts) {
   // Second wave: the rest of the closure, now that base is healthy. composeUp is
   // additive, so this only starts the app-layer containers.
   if (phased) {
-    const appWave = composeUp([], { profiles });
+    const appWave = composeUp([], { profiles: waveProfiles });
     if (appWave.code !== 0) fail('docker compose up failed');
   }
 
