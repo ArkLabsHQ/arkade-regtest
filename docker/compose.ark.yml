@@ -84,22 +84,29 @@ services:
     volumes:
       - ark_datadir:/app/data
 
-  # ── Boltz LND (swap counterparty wallet) ───────────────────────────────────
-  boltz-lnd:
-    image: ${BOLTZ_LND_IMAGE:-btcpayserver/lnd:v0.19.3-beta}
+  # ── Peer Lightning node (channel counterparty for the base `lnd`) ──────────
+  # Keeps a `boltz-lnd` network alias for anything still dialling the old name.
+  # An alias is DNS only, so it does NOT cover `docker exec boltz-lnd` — the
+  # setup scripts address this node as `lnd-peer`.
+  lnd-peer:
+    image: ${LND_PEER_IMAGE:-${BOLTZ_LND_IMAGE:-btcpayserver/lnd:v0.19.3-beta}}
     restart: unless-stopped
-    container_name: boltz-lnd
-    profiles: ['boltz']
+    container_name: lnd-peer
+    profiles: ['lightning']
+    networks:
+      default:
+        aliases:
+          - boltz-lnd
     environment:
       LND_CHAIN: 'btc'
       LND_ENVIRONMENT: 'regtest'
       LND_EXPLORERURL: 'http://nbxplorer:32838/'
-      LND_REST_LISTEN_HOST: http://boltz-lnd:8080
+      LND_REST_LISTEN_HOST: http://lnd-peer:8080
       LND_EXTRA_ARGS: |
         bitcoin.node=bitcoind
         maxpendingchannels=10
         rpclisten=0.0.0.0:10009
-        restlisten=boltz-lnd:8080
+        restlisten=lnd-peer:8080
         bitcoind.rpchost=bitcoin:18443
         bitcoind.rpcuser=admin1
         bitcoind.rpcpass=123
@@ -108,7 +115,7 @@ services:
         db.bolt.auto-compact=true
         db.prune-revocation=true
         alias=Ark Labs
-        externalip=boltz-lnd:9735
+        externalip=lnd-peer:9735
         protocol.option-scid-alias=true
         protocol.wumbo-channels=true
         accept-keysend=true
@@ -120,37 +127,16 @@ services:
         protocol.custom-nodeann=39
         protocol.custom-init=39
         no-rest-tls=1
-        tlsextradomain=boltz-lnd
+        tlsextradomain=lnd-peer,boltz-lnd
         debuglevel=debug
         restcors=*
     volumes:
       - boltz_lnd_datadir:/root/.lnd
     ports:
-      - '${BOLTZ_LND_P2P_PORT:-9736}:9735'
-      - '${BOLTZ_LND_RPC_PORT:-10010}:10009'
+      - '${LND_PEER_P2P_PORT:-${BOLTZ_LND_P2P_PORT:-9736}}:9735'
+      - '${LND_PEER_RPC_PORT:-${BOLTZ_LND_RPC_PORT:-10010}}:10009'
 
-  # ── Fulmine (Ark wallet daemon, Boltz-integrated) ──────────────────────────
-  boltz-fulmine:
-    image: ${FULMINE_IMAGE:-ghcr.io/arklabshq/fulmine:v0.4.0-rc.1}
-    container_name: boltz-fulmine
-    profiles: ['boltz']
-    environment:
-      - FULMINE_ARK_SERVER=http://arkd:7070
-      - FULMINE_ESPLORA_URL=http://mempool_web/api
-      - FULMINE_NO_MACAROONS=true
-      - FULMINE_DISABLE_TELEMETRY=true
-      - FULMINE_UNLOCKER_TYPE=env
-      - FULMINE_UNLOCKER_PASSWORD=password
-      - FULMINE_EMULATOR_PUBKEY=${EMULATOR_PUBKEY:-}
-      - FULMINE_LOG_LEVEL=5
-    ports:
-      - ${FULMINE_GRPC_PORT:-7004}:7000
-      - ${FULMINE_API_PORT:-7003}:7001
-      - ${FULMINE_HTTP_PORT:-7002}:7002
-    volumes:
-      - boltz_fulmine_datadir:/app/data
-    restart: unless-stopped
-
+  # ── Fulmine delegator (Ark wallet daemon, delegation enabled) ──────────────
   fulmine-delegator:
     image: ${FULMINE_IMAGE:-ghcr.io/arklabshq/fulmine:v0.3.25}
     container_name: fulmine-delegator
@@ -174,165 +160,6 @@ services:
       - fulmine_delegator_datadir:/app/data
     restart: unless-stopped
 
-  # ── Boltz (swap server) ────────────────────────────────────────────────────
-  boltz:
-    image: ${BOLTZ_IMAGE:-boltz/boltz:latest}
-    container_name: boltz
-    profiles: ['boltz']
-    restart: unless-stopped
-    ports:
-      - '${BOLTZ_GRPC_PORT:-9000}:9000'
-      - '${BOLTZ_API_PORT:-9001}:9001'
-      - '${BOLTZ_WS_PORT:-9004}:9004'
-    expose:
-      - '9001'
-    environment:
-      BOLTZ_CONFIG: |
-        loglevel = "debug"
-        network = "regtest"
-        nonInteractiveClaims = true
-
-        [ark]
-        host = "boltz-fulmine"
-        port = 7000
-        rescanInterval = 30
-
-        [ark.unilateralDelays]
-        ## THESE CSV VALUES ARE EXPRESSED IN BLOCKS ##
-        # If useLocktimeSeconds = true, 10 mins blocktime is used to convert the values in minutes
-        claim = 105
-        refund = 110
-        refundWithoutReceiver = 115
-
-        [api]
-        host = "0.0.0.0"
-        port = 9001
-        cors = "*"
-
-        [grpc]
-        host = "0.0.0.0"
-        port = 9000
-
-        [sidecar]
-        [sidecar.grpc]
-        host = "0.0.0.0"
-        port = 9003
-
-        [sidecar.ws]
-        host = "0.0.0.0"
-        port = 9004
-
-        [sidecar.api]
-        host = "0.0.0.0"
-        port = 9005
-
-        [postgres]
-        host = "postgres"
-        port = 5432
-        database = "boltz"
-        username = "postgres"
-        password = "postgres"
-
-        [swap]
-        deferredClaimSymbols = [ "BTC" ]
-
-        [[pairs]]
-        base = "ARK"
-        quote = "BTC"
-        rate = 1
-        fee = 0.4
-        swapInFee = 0.01
-        invoiceExpiry = 3600
-        maxSwapAmount = 4294967
-        minSwapAmount = 1000
-
-        [pairs.timeoutDelta]
-        ## THESE CLTV VALUES ARE EXPRESSED IN MINUTES ##
-        # If useLocktimeSeconds = false, divide them by 10 (mainnet blocktime) to get the actual
-        # values in blocks.
-        # Lnd here sets the hard lower bound: 240 (24 blocks).
-        # This means arkd must have vtxo tree expiry > 24 blocks or we can't test refund of swaps
-        # with offchain tx.
-        # Also, as per our LN environment, swapTaproot min value is 810 (81 blocks).
-        reverse = 240
-        chain = 100
-        swapMinimal = 100
-        swapMaximal = 200
-        swapTaproot = 1200
-
-        [[currencies]]
-        symbol = "BTC"
-        network = "bitcoinRegtest"
-        minWalletBalance = 10000000
-        minLocalBalance = 10000000
-        minRemoteBalance = 10000000
-        maxSwapAmount = 4294967
-        minSwapAmount = 50000
-        maxZeroConfAmount = 100000
-        preferredWallet = "core"
-
-        [currencies.chain]
-        host = "bitcoin"
-        port = 18443
-        user = "admin1"
-        password = "123"
-        zmqpubrawtx = "tcp://bitcoin:28333"
-        zmqpubrawblock = "tcp://bitcoin:28332"
-
-        [[currencies.lnds]]
-        host = "boltz-lnd"
-        port = 10009
-        certpath = "/home/boltz/.lnd/tls.cert"
-        macaroonpath = "/home/boltz/.lnd/data/chain/bitcoin/regtest/admin.macaroon"
-    volumes:
-      - boltz_datadir:/home/boltz/.boltz
-      - boltz_lnd_datadir:/home/boltz/.lnd
-    entrypoint:
-      - sh
-      - -c
-      - |
-        # Wait for postgres to be ready
-        until PGPASSWORD=postgres psql -h postgres -U postgres -c '\q' 2>/dev/null; do
-          echo "Waiting for postgres..."
-          sleep 1
-        done
-
-        # Create database if it doesn't exist (postgres uses trust auth here)
-        PGPASSWORD=postgres psql -h postgres -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'boltz'" | grep -q 1 || \
-        PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE DATABASE boltz"
-
-        # Start boltzd
-        echo "$$BOLTZ_CONFIG" > /home/boltz/.boltz/boltz.config
-        boltzd --datadir /home/boltz/.boltz --configpath /home/boltz/.boltz/boltz.config
-
-  # ── Boltz CORS proxy ───────────────────────────────────────────────────────
-  nginx-boltz:
-    image: ${NGINX_IMAGE:-nginx:alpine}
-    container_name: nginx-boltz
-    profiles: ['boltz']
-    restart: unless-stopped
-    ports:
-      - '${NGINX_PORT:-9069}:9069'
-    volumes:
-      - ./boltz.nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    depends_on:
-      - boltz
-
-  # ── LNURL server ───────────────────────────────────────────────────────────
-  lnurl-server:
-    image: ${LNURL_IMAGE:-ghcr.io/arklabshq/lnurl-server:0.2.6}
-    container_name: lnurl-server
-    profiles: ['boltz']
-    ports:
-      - '${LNURL_PORT:-9090}:3000'
-    environment:
-      - PORT=3000
-      - BASE_URL=http://localhost:${LNURL_PORT:-9090}
-      - MIN_SENDABLE=1000
-      - MAX_SENDABLE=100000000000
-      - INVOICE_TIMEOUT_MS=30000
-    restart: unless-stopped
-
   # ── Arkade web wallet ──────────────────────────────────────────────────────
   arkade-wallet:
     image: ${WALLET_IMAGE:-ghcr.io/arkade-os/wallet:latest}
@@ -342,10 +169,8 @@ services:
       - '${WALLET_PORT:-3003}:80'
     environment:
       - VITE_ARK_SERVER=http://localhost:7070
-      - VITE_BOLTZ_URL=http://localhost:${NGINX_PORT:-9069}
       - VITE_NOSTR_RELAY_URL=ws://localhost:10547
       - VITE_DELEGATOR_URL=http://localhost:${DELEGATOR_HTTP_PORT:-7012}
-      - VITE_LNURL_SERVER_URL=http://localhost:${LNURL_PORT:-9090}
     restart: unless-stopped
 
   # ── Arkade explorer (static web UI, repointed at the local arkd) ───────────
@@ -470,8 +295,8 @@ services:
   # real LND node. Two daemons, two profiles; only the names rhyme.
   #
   # Its Lightning side is the base `lnd`, which has no funds and no channel
-  # until the boltz setup opens and balances one to it — so the `intent-solver`
-  # profile pulls in `boltz` as well as `ark` and `emulator`, and the
+  # until `lnd-peer` opens and balances one to it — so the `intent-solver`
+  # profile pulls in `lightning` as well as `ark` and `emulator`, and the
   # orchestrator starts this last, once that setup has run.
   #
   # `user: root` is a regtest-only concession: the image runs as `node`, and
@@ -490,7 +315,7 @@ services:
     # enable every profile, and compose rejects the whole project over a service
     # with no image at all. Correct it here, and drop the empty default in
     # .env.defaults, when the first image ships.
-    image: ${INTENT_SOLVER_IMAGE:-ghcr.io/arkade-os/intent-solver:v0.2.0}
+    image: ${INTENT_SOLVER_IMAGE:-ghcr.io/arkade-os/intent-solver:0.2.0}
     container_name: intent-solver
     profiles: ['intent-solver']
     restart: unless-stopped
@@ -564,9 +389,9 @@ services:
 
   # ── Bucket sync database bootstrap — profile `sync` ────────────────────────
   # One-shot: creates the bucket-sync database, then exits. The server can't do
-  # this itself in an entrypoint the way boltz does — its image is runtime-deps
-  # based (native binary, no psql client), and its migrations only CREATE TABLE,
-  # so the database has to exist before it boots.
+  # this itself in an entrypoint — its image is runtime-deps based (native
+  # binary, no psql client), and its migrations only CREATE TABLE, so the
+  # database has to exist before it boots.
   bucket-sync-initdb:
     image: ${POSTGRES_IMAGE:-postgres:16}
     container_name: bucket-sync-initdb
@@ -645,9 +470,7 @@ services:
 volumes:
   ark_wallet_datadir:
   ark_datadir:
-  boltz_datadir:
   boltz_lnd_datadir:
-  boltz_fulmine_datadir:
   fulmine_delegator_datadir:
   solver_datadir:
   intent_solver_datadir:

@@ -12,9 +12,9 @@
 //   node regtest.mjs signer-info       (print the active + deprecated signer set)
 //
 // Profiles (and their dependencies) let you bring up a subset of the stack:
-//   ark → base,  delegate → ark,  boltz → ark,  emulator → ark,
-//   solver → ark + emulator,  intent-solver → ark + emulator + boltz + nostr,
-//   sync → base,  nostr → base. `--profile boltz` brings up base+ark+boltz;
+//   ark → base,  delegate → ark,  lightning → ark,  emulator → ark,
+//   solver → ark + emulator,  intent-solver → ark + emulator + lightning + nostr,
+//   sync → base,  nostr → base. `--profile lightning` brings up base+ark+lnd-peer;
 //   `--profile sync` / `--profile nostr` skip the Ark stack entirely.
 //   Selection precedence: --profile flags > REGTEST_PROFILES env (comma-list)
 //   > full stack.
@@ -27,8 +27,8 @@ import { docker } from './lib/proc.mjs';
 import { sleep, waitForOrFail, httpOk, fetchJson } from './lib/wait.mjs';
 import { bitcoinCli, bootstrapChain, mine, faucet, reorg } from './lib/chain.mjs';
 import { setupArkd, applyArkdFees } from './lib/setup/arkd.mjs';
-import { setupFulmine, setupDelegator } from './lib/setup/fulmine.mjs';
-import { setupBoltz } from './lib/setup/boltz.mjs';
+import { setupDelegator } from './lib/setup/fulmine.mjs';
+import { setupLightning } from './lib/setup/lightning.mjs';
 import { setupSolver } from './lib/setup/solver.mjs';
 import { createInvoice, payInvoice } from './lib/invoice.mjs';
 import { rotateSigner, setSigners, signerInfo, clearSignerState } from './lib/setup/signer.mjs';
@@ -39,14 +39,14 @@ const PROFILE_DEPS = {
   base: [],
   ark: ['base'],
   delegate: ['ark'], // standalone fulmine-delegator
-  boltz: ['ark'], // boltz + its own boltz-fulmine + boltz-lnd (independent of the delegator)
+  lightning: ['ark'], // lnd-peer, and the channel it opens to the base `lnd`
   emulator: ['ark'],
   covclaimd: ['ark', 'emulator'], // non-interactive claim daemon; needs arkd + emulator
   solver: ['ark', 'emulator'],
   // arkade-os/intent-solver — the Lightning <-> Arkade swap solver, backed by
-  // the base `lnd`. `boltz` is not optional here: its setup is the only thing
-  // that funds that node and opens a channel to it, so without it every
-  // Lightning corridor is dead on arrival.
+  // the base `lnd`. `lightning` is not optional here: it is the only thing that
+  // funds that node and opens a channel to it, so without it every Lightning
+  // corridor is dead on arrival.
   //
   // `nostr` for the solver's registry card, which names a relay a client can
   // reach it on, and for the ad the admin console can post there. NOT for
@@ -54,7 +54,7 @@ const PROFILE_DEPS = {
   // and the process never subscribes to the relay — only `command: relay`
   // does, and it has no listening swap port. Both transports carry identical
   // payloads; which one answers is a function of the mode, not the config.
-  'intent-solver': ['ark', 'emulator', 'boltz', 'nostr'],
+  'intent-solver': ['ark', 'emulator', 'lightning', 'nostr'],
   sync: ['base'], // bucket-sync-server — opaque key/value store, no Ark dependency
   nostr: ['base'], // strfry — a Nostr relay; stores signed events, no Ark dependency
 };
@@ -136,7 +136,7 @@ async function startCovclaimd() {
 }
 
 // The swap solver, started last of the app tiers: its Lightning side is the
-// base `lnd`, which only has a funded, balanced channel once setupBoltz() has
+// base `lnd`, which only has a funded, balanced channel once setupLightning() has
 // run. `serve` answers /healthz, so that — not a bare open port — is what
 // readiness is measured on.
 async function startIntentSolver() {
@@ -199,11 +199,8 @@ function banner(active) {
   if (active.has('delegate')) {
     lines.push(`  Delegator API   http://localhost:${env('DELEGATOR_API_PORT', '7011')}`);
   }
-  if (active.has('boltz')) {
-    lines.push(`  Fulmine API     http://localhost:${env('FULMINE_API_PORT', '7003')}`);
-    lines.push(`  Boltz LND       localhost:${env('BOLTZ_LND_RPC_PORT', '10010')}`);
-    lines.push(`  Boltz CORS      http://localhost:${env('NGINX_PORT', '9069')}`);
-    lines.push(`  Boltz gRPC      localhost:${env('BOLTZ_GRPC_PORT', '9000')}`);
+  if (active.has('lightning')) {
+    lines.push(`  Peer LND        localhost:${env('LND_PEER_RPC_PORT', env('BOLTZ_LND_RPC_PORT', '10010'))}`);
   }
   if (active.has('emulator')) {
     lines.push(`  Emulator        http://localhost:${env('EMULATOR_PORT', '7073')}`);
@@ -276,7 +273,7 @@ async function start(opts) {
   // "server misbehaving") and races arkd-wallet against nbxplorer's first-boot
   // migration, crash-looping both. So bring up base (bitcoind, nbxplorer,
   // fulcrum, mempool, postgres) FIRST, settle the chain + explorer, and only
-  // THEN start the app layer (ark, boltz, ...) against a healthy base.
+  // THEN start the app layer (ark, lightning, ...) against a healthy base.
   const phased = active.has('base') && active.size > 1;
 
   const firstWave = composeUp([], { profiles: phased ? ['base'] : profiles });
@@ -307,10 +304,7 @@ async function start(opts) {
 
   if (active.has('ark')) await setupArkd();
   if (active.has('delegate')) await setupDelegator();
-  if (active.has('boltz')) {
-    await setupFulmine(); // boltz-fulmine lives in the boltz profile
-    await setupBoltz();
-  }
+  if (active.has('lightning')) await setupLightning();
   if (active.has('emulator')) await startEmulator();
   if (active.has('covclaimd')) await startCovclaimd();
   if (active.has('solver')) await setupSolver();

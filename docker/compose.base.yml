@@ -77,7 +77,7 @@ services:
             && echo "auto-miner: mined a block" || echo "auto-miner: skipped (node/wallet not ready)"
         done
 
-  # ── Postgres (shared: nbxplorer + boltz each create their own database) ─────
+  # ── Postgres (shared: nbxplorer, arkd and bucket-sync each get a database) ──
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:16}
     container_name: postgres
@@ -102,7 +102,7 @@ services:
     volumes:
       - postgres_datadir:/var/lib/postgresql/data
 
-  # ── NBXplorer (arkd-wallet + boltz-lnd UTXO indexer) ───────────────────────
+  # ── NBXplorer (arkd-wallet + lnd-peer UTXO indexer) ────────────────────────
   nbxplorer:
     image: ${NBXPLORER_IMAGE:-nicolasdorier/nbxplorer:2.6.7}
     container_name: nbxplorer
@@ -248,7 +248,7 @@ services:
     ports:
       - "${MEMPOOL_WEB_PORT:-3000}:80"
 
-  # ── Counterparty Lightning node (boltz-lnd opens a channel to this) ────────
+  # ── Counterparty Lightning node (lnd-peer opens a channel to this) ─────────
   lnd:
     image: ${LND_IMAGE:-btcpayserver/lnd:v0.19.3-beta}
     container_name: lnd
@@ -266,7 +266,7 @@ services:
       LND_ENVIRONMENT: "regtest"
       # BTCPay's initunlock wrapper curls this URL over http to auto-create/unlock
       # the wallet, so it must match restlisten + no-rest-tls (same pattern as
-      # boltz-lnd). Binding REST to the container hostname is accepted with
+      # lnd-peer). Binding REST to the container hostname is accepted with
       # no-rest-tls; binding to 0.0.0.0 would make lnd refuse to start.
       LND_REST_LISTEN_HOST: http://lnd:8080
       LND_EXTRA_ARGS: |

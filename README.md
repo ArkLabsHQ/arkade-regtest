@@ -1,6 +1,6 @@
 # arkade-regtest
 
-A self-contained, cross-platform regtest environment for Ark protocol development. It orchestrates Bitcoin Core, Fulcrum, mempool, NBXplorer, arkd, Fulmine, Boltz, an LND node, an end-to-end-encrypted bucket sync server, and a strfry Nostr relay into a single reproducible Docker Compose stack — driven by a small zero-dependency Node CLI.
+A self-contained, cross-platform regtest environment for Ark protocol development. It orchestrates Bitcoin Core, Fulcrum, mempool, NBXplorer, arkd, Fulmine, two LND nodes with a channel between them, an end-to-end-encrypted bucket sync server, and a strfry Nostr relay into a single reproducible Docker Compose stack — driven by a small zero-dependency Node CLI.
 
 There is **no dependency on nigiri** and **no compiled binary** to maintain: everything is standard Docker images plus a Node orchestrator. It runs the same on Linux, macOS, and Windows (no WSL required).
 
@@ -39,7 +39,7 @@ node regtest.mjs faucet <address> <amountBtc> [--confirm]   # send from the node
 node regtest.mjs mine [n]                        # mine n blocks (default 1)
 node regtest.mjs reorg [depth]                   # simulate a reorg of `depth` blocks (default 1)
 node regtest.mjs rpc <args...>                   # bitcoin-cli passthrough (replaces `nigiri rpc`)
-node regtest.mjs create-invoice [--secondary]    # 100k-sat invoice (boltz-lnd, or lnd)
+node regtest.mjs create-invoice [--secondary]    # 100k-sat invoice (lnd-peer, or lnd)
 node regtest.mjs pay-invoice <invoice>           # pay from the non-destination node
 node regtest.mjs ark <args...>                   # ark client CLI, run inside the arkd container
 node regtest.mjs arkd <args...>                  # arkd server CLI, run inside the arkd container
@@ -58,11 +58,10 @@ Two compose files are merged into one project (`arkade-regtest`):
 - **`docker/compose.base.yml`** — chain + indexers + explorer + counterparty LN:
   `bitcoin` (Bitcoin Core regtest), `postgres`, `nbxplorer`, `fulcrum` (Electrum server),
   `mempool_api` + `mempool_web` + `mempool_mariadb` (block explorer & Esplora REST API), and `lnd`.
-- **`docker/compose.ark.yml`** — the Ark stack: `arkd` + `arkd-wallet`, `boltz`, `boltz-lnd`,
-  `boltz-fulmine`, `fulmine-delegator`, `nginx-boltz`, `lnurl-server`, `arkade-wallet`, and the
-  profile-gated `emulator` and `intent-solver` — plus `bucket-sync` (and its one-shot
-  `bucket-sync-initdb`) and `strfry`, which ride on the same base but have no Ark dependency of
-  their own.
+- **`docker/compose.ark.yml`** — the Ark stack: `arkd` + `arkd-wallet`, `lnd-peer`,
+  `fulmine-delegator`, `arkade-wallet`, `arkade-explorer`, and the profile-gated `emulator` and
+  `intent-solver` — plus `bucket-sync` (and its one-shot `bucket-sync-initdb`) and `strfry`, which
+  ride on the same base but have no Ark dependency of their own.
 
 arkd and Fulmine consume the **Esplora-compatible REST API that mempool serves under `/api`**
 (`http://mempool_web/api` inside the network) — an officially supported arkd explorer backend.
@@ -78,10 +77,10 @@ Services are grouped into compose profiles so you can bring up just the tier you
 | `base`          | bitcoin, postgres, nbxplorer, fulcrum, mempool (api/web/db), lnd  | —                          |
 | `ark`           | arkd, arkd-wallet, arkade-wallet, arkade-explorer                 | `base`                     |
 | `delegate`      | fulmine-delegator                                                 | `ark`                      |
-| `boltz`         | boltz, boltz-fulmine, boltz-lnd, nginx-boltz, lnurl-server        | `ark`                      |
+| `lightning`     | lnd-peer (+ its channel to the base `lnd`)                        | `ark`                      |
 | `emulator`      | emulator                                                          | `ark`                      |
 | `solver`        | solver, pricefeed                                                 | `ark`, `emulator`          |
-| `intent-solver` | intent-solver                                                     | `ark`, `emulator`, `boltz`, `nostr` |
+| `intent-solver` | intent-solver                                                     | `ark`, `emulator`, `lightning`, `nostr` |
 | `sync`          | bucket-sync, bucket-sync-initdb                                   | `base`                     |
 | `nostr`         | strfry                                                            | `base`                     |
 
@@ -89,12 +88,12 @@ Services are grouped into compose profiles so you can bring up just the tier you
 node regtest.mjs start                      # full stack (all profiles)
 node regtest.mjs start --profile base       # just the chain + explorer/indexer
 node regtest.mjs start --profile ark        # base + ark (incl. web wallet + explorer)
-node regtest.mjs start --profile boltz      # base + ark + boltz (incl. boltz-fulmine)
+node regtest.mjs start --profile lightning  # base + ark + lnd-peer, channel opened and balanced
 node regtest.mjs start --profile solver     # base + ark + emulator + solver
-node regtest.mjs start --profile intent-solver   # base + ark + emulator + boltz + nostr + the swap solver
+node regtest.mjs start --profile intent-solver   # base + ark + emulator + lightning + nostr + the swap solver
 node regtest.mjs start --profile sync       # base + bucket sync server (no arkd)
 node regtest.mjs start --profile nostr      # base + strfry Nostr relay (no arkd)
-node regtest.mjs start --profile emulator --profile boltz   # combine targets
+node regtest.mjs start --profile emulator --profile lightning   # combine targets
 ```
 
 You can also pin profiles via the `REGTEST_PROFILES` env var (comma-separated, e.g. in `.env.regtest`) instead of passing `--profile`. Precedence: `--profile` flags > `REGTEST_PROFILES` > full stack.
@@ -115,7 +114,7 @@ Variables in the override file replace their `.env.defaults` counterparts; unspe
 
 ### Host ports
 
-Every host-exposed port is configurable via `${VAR:-default}` so you can avoid local collisions or run multiple stacks side by side — only the host side is remapped; container-internal ports stay fixed. Base layer: `BITCOIN_RPC_PORT` (18443), `BITCOIN_P2P_PORT` (18444), `BITCOIN_ZMQ_BLOCK_PORT` (28332), `BITCOIN_ZMQ_TX_PORT` (28333), `NBXPLORER_PORT` (32838), `POSTGRES_PORT` (39372), `FULCRUM_TCP_PORT` (50001), `FULCRUM_WS_PORT` (50003), `LND_P2P_PORT` (9735), `LND_RPC_PORT` (10009), `MEMPOOL_WEB_PORT` (3000). Ark layer: `ARKD_PORT` (7070), `ARKD_ADMIN_PORT` (7071), `ARKD_WALLET_PORT` (6060), plus the existing Fulmine/Boltz/solver port vars. The CLI reads `ARKD_PORT`/`ARKD_ADMIN_PORT` itself, so overriding them keeps `start`'s arkd setup pointed at the right host ports.
+Every host-exposed port is configurable via `${VAR:-default}` so you can avoid local collisions or run multiple stacks side by side — only the host side is remapped; container-internal ports stay fixed. Base layer: `BITCOIN_RPC_PORT` (18443), `BITCOIN_P2P_PORT` (18444), `BITCOIN_ZMQ_BLOCK_PORT` (28332), `BITCOIN_ZMQ_TX_PORT` (28333), `NBXPLORER_PORT` (32838), `POSTGRES_PORT` (39372), `FULCRUM_TCP_PORT` (50001), `FULCRUM_WS_PORT` (50003), `LND_P2P_PORT` (9735), `LND_RPC_PORT` (10009), `MEMPOOL_WEB_PORT` (3000). Ark layer: `ARKD_PORT` (7070), `ARKD_ADMIN_PORT` (7071), `ARKD_WALLET_PORT` (6060), plus the existing peer-LND/delegator/solver port vars. The CLI reads `ARKD_PORT`/`ARKD_ADMIN_PORT` itself, so overriding them keeps `start`'s arkd setup pointed at the right host ports.
 
 ### Custom arkd version
 
@@ -174,6 +173,19 @@ Two rules when using block values:
 - **Disable the auto-miner** (`AUTOMINE_INTERVAL=0`) for deterministic tests. Otherwise the background miner advances the chain tip on its own and fires sweeps/expiry mid-test, making block-height-sensitive tests non-deterministic — mine explicitly with `node regtest.mjs mine <n>` instead.
 - **All values must share the same type** (all blocks *or* all seconds). arkd validates this and refuses to start on a mismatch.
 
+### Lightning (`lnd-peer` and its channel)
+
+The base layer ships one LND node (`lnd`) with no funds and no channel. The `lightning` profile adds a second, `lnd-peer`, and `start` funds it, opens a `LND_CHANNEL_SIZE` channel to `lnd`, and pushes 500k sats back through it so the channel carries payments in **both** directions. That is what every Lightning corridor in this stack — the intent solver's included — actually runs on.
+
+`lnd-peer` was previously called `boltz-lnd`, and kept the `boltz_lnd_datadir` volume so existing stacks don't re-sync from scratch. It also keeps a **network alias** of `boltz-lnd`, so anything dialling it over the docker network (`boltz-lnd:10009`, a REST URL, a peer address) still resolves. An alias is DNS only, so it does **not** cover `docker exec boltz-lnd …` — use `lnd-peer` there. `LND_PEER_IMAGE` / `LND_PEER_P2P_PORT` / `LND_PEER_RPC_PORT` fall back to the old `BOLTZ_LND_*` names, so an existing override file keeps working.
+
+```bash
+node regtest.mjs create-invoice              # on lnd-peer
+node regtest.mjs create-invoice --secondary  # on lnd
+node regtest.mjs pay-invoice <invoice>       # pays from whichever node is not the destination
+docker exec lnd-peer lncli --network=regtest listchannels
+```
+
 ### Emulator (arkade-script signing service)
 
 The [arkade-os/emulator](https://github.com/arkade-os/emulator) runs **by default** at `http://localhost:${EMULATOR_PORT}` (default `7073`). It is started last, after arkd is wallet-ready. Disable it for a faster boot by clearing the image in your override:
@@ -186,12 +198,12 @@ EMULATOR_IMAGE=
 
 [arkade-os/intent-solver](https://github.com/arkade-os/intent-solver) is the reference swap solver: it quotes and settles Lightning <-> Arkade swaps against a real LND node. It is **not** the `solver` service — that one is solverd, the virtual-mempool intent solver. Two different daemons under two different profiles.
 
-It runs in the `intent-solver` profile at `http://localhost:${INTENT_SOLVER_PORT}` (default `8787`), started last so its dependencies are ready. That profile resolves to `ark`, `emulator`, `boltz` **and `nostr`**, matching `PROFILE_DEPS` in `regtest.mjs` and the table above. Boltz is not optional here: its setup is the only thing in this repo that funds the base `lnd` node and opens a channel to it, so without it every Lightning corridor would be dead on arrival. Nostr (strfry) comes along because the solver's registry card advertises a relay — it is not how a trader reaches this container, which answers swaps over HTTP. The solver reuses that node rather than adding a second funding path (`lnd:10009`, with the cert and admin macaroon read straight off the `lnd_datadir` volume).
+It runs in the `intent-solver` profile at `http://localhost:${INTENT_SOLVER_PORT}` (default `8787`), started last so its dependencies are ready. That profile resolves to `ark`, `emulator`, `lightning` **and `nostr`**, matching `PROFILE_DEPS` in `regtest.mjs` and the table above. `lightning` is not optional here: it is the only thing in this repo that funds the base `lnd` node and opens a channel to it, so without it every Lightning corridor would be dead on arrival. Nostr (strfry) comes along because the solver's registry card advertises a relay — it is not how a trader reaches this container, which answers swaps over HTTP. The solver reuses that node rather than adding a second funding path (`lnd:10009`, with the cert and admin macaroon read straight off the `lnd_datadir` volume).
 
 The profile is **off by default**, because the image is not published yet. Name a build in your override file to turn it on:
 
 ```bash
-INTENT_SOLVER_IMAGE=ghcr.io/arkade-os/intent-solver:v0.2.0
+INTENT_SOLVER_IMAGE=ghcr.io/arkade-os/intent-solver:0.2.0
 ```
 
 Until then `start` logs `intent-solver disabled (INTENT_SOLVER_IMAGE empty; set it to enable the profile)` and skips it — including in the full-stack default — the same "clear the image to disable it" idiom as `EMULATOR_IMAGE`, in reverse.
@@ -278,11 +290,9 @@ STRFRY_IMAGE=ghcr.io/hoytech/strfry@sha256:<digest>   # in your override file
 | Postgres           | `localhost:39372` (trust; DBs: arkd, nbxplorer, bucketsync) | 39372 |
 | Arkd               | `http://localhost:7070` (admin `7071`) | 7070         |
 | Arkd Wallet        | `http://localhost:6060`                | 6060         |
-| Fulmine API        | `http://localhost:7003`                | 7003         |
 | Delegator API      | `http://localhost:7011`                | 7011         |
-| Boltz CORS proxy   | `http://localhost:9069`                | 9069         |
-| Boltz gRPC         | `localhost:9000`                       | 9000         |
-| Boltz LND RPC      | `localhost:10010`                      | 10010        |
+| Counterparty LND   | `localhost:10009` (gRPC)               | 10009        |
+| Peer LND (`lnd-peer`) | `localhost:10010` (gRPC)            | 10010        |
 | Web wallet         | `http://localhost:3003`                | 3003         |
 | Arkade explorer    | `http://localhost:7080`                | 7080         |
 | Emulator           | `http://localhost:7073`                | 7073         |
