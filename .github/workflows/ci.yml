@@ -36,18 +36,16 @@ jobs:
           echo "== mempool Esplora API (regtest) =="
           test "$(curl -sf http://localhost:3000/api/blocks/tip/height)" -ge 0
 
-          echo "== Fulmine wallet (initialized + funded) =="
-          curl -sf http://localhost:7003/api/v1/wallet/status | jq -e '.initialized == true'
-          curl -sf http://localhost:7003/api/v1/balance | jq -e '(.amount | tonumber) > 0'
-
           echo "== Delegator wallet (initialized + funded) =="
           curl -sf http://localhost:7011/api/v1/wallet/status | jq -e '.initialized == true'
           curl -sf http://localhost:7011/api/v1/balance | jq -e '(.amount | tonumber) > 0'
 
-          echo "== Boltz ARK/BTC pairs (direct API) =="
-          curl -sf http://localhost:9001/v2/swap/submarine | grep -q '"ARK"'
-          echo "== Boltz CORS proxy (nginx) =="
-          curl -sf http://localhost:9069/v2/swap/submarine | grep -q '"ARK"'
+          echo "== Lightning channel (lnd-peer -> lnd) =="
+          # `docker exec` resolves the container name, which the `boltz-lnd`
+          # network alias does not cover — so this also gates the rename.
+          chans=$(docker exec lnd-peer lncli --network=regtest listchannels)
+          echo "$chans" | jq -r '.channels[] | "chan \(.chan_id) active=\(.active) local=\(.local_balance) remote=\(.remote_balance)"'
+          echo "$chans" | jq -e '[.channels[] | select(.active)] | length > 0'
 
           echo "== Emulator =="
           curl -sf http://localhost:7073/v1/info | jq -e '.signerPubkey != null'
@@ -171,7 +169,7 @@ jobs:
         if: failure()
         run: |
           docker compose -f docker/compose.base.yml -f docker/compose.ark.yml ps || true
-          for c in bitcoin fulcrum mempool_api mempool_web nbxplorer arkd-wallet arkd arkade-wallet arkade-explorer boltz boltz-lnd boltz-fulmine emulator solver bucket-sync-initdb bucket-sync strfry; do
+          for c in bitcoin fulcrum mempool_api mempool_web nbxplorer arkd-wallet arkd arkade-wallet arkade-explorer lnd lnd-peer fulmine-delegator emulator solver intent-solver bucket-sync-initdb bucket-sync strfry; do
             echo "===== logs: $c ====="
             docker logs --tail 80 "$c" 2>&1 || true
           done
