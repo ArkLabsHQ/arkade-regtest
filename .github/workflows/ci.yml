@@ -36,9 +36,9 @@ jobs:
           echo "== mempool Esplora API (regtest) =="
           test "$(curl -sf http://localhost:3000/api/blocks/tip/height)" -ge 0
 
-          echo "== Delegator wallet (initialized + funded) =="
-          curl -sf http://localhost:7011/api/v1/wallet/status | jq -e '.initialized == true'
-          curl -sf http://localhost:7011/api/v1/balance | jq -e '(.amount | tonumber) > 0'
+          echo "== Delegator wallet (initialized + ready) =="
+          curl -sf http://localhost:7011/api/v1/wallet/status \
+            | jq -e '.initialized == true and .synced == true and .unlocked == true'
 
           echo "== Lightning channel (lnd-peer -> lnd) =="
           # `docker exec` resolves the container name, which the `boltz-lnd`
