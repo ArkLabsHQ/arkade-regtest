@@ -23,7 +23,7 @@
 import { loadEnv, env } from './lib/env.mjs';
 import { log, warn, fail } from './lib/log.mjs';
 import { ROOT, composeUp, composeStop, composeDown } from './lib/compose.mjs';
-import { docker } from './lib/proc.mjs';
+import { docker, dockerExec } from './lib/proc.mjs';
 import { sleep, waitForOrFail, httpOk, fetchJson } from './lib/wait.mjs';
 import { bitcoinCli, bootstrapChain, mine, faucet, reorg } from './lib/chain.mjs';
 import { setupArkd, applyArkdFees } from './lib/setup/arkd.mjs';
@@ -152,6 +152,42 @@ async function startIntentSolver() {
     intervalMs: 2000,
   });
   log(`intent-solver up at http://localhost:${port} (LN backend: lnd)`);
+  fundIntentSolver();
+}
+
+// Give the solver Arkade float.
+//
+// Its Lightning side is funded by setupLightning(), but nothing funded the
+// Arkade side, and the two are not interchangeable: the RECEIVE corridors have
+// the solver fund a lockup out of its own Arkade balance, so with zero float it
+// quotes and then cannot fill. The send direction hides this — there the client
+// funds and the solver only needs LN outbound — which is why an unfunded solver
+// still looks healthy.
+//
+// The address cannot be hardcoded even though INTENT_SOLVER_MNEMONIC is fixed:
+// an Arkade address commits to the operator pubkey, which is per-stack. So ask
+// the container, via the same CLI entrypoint the image runs.
+function fundIntentSolver() {
+  const sats = env('INTENT_SOLVER_FLOAT_SATS', '5000000');
+  if (sats === '0') return log('intent-solver float disabled (INTENT_SOLVER_FLOAT_SATS=0)');
+
+  const cli = ['node', '--enable-source-maps', '--experimental-eventsource', 'packages/solver-app/dist/cli.js'];
+  const out = dockerExec('intent-solver', [...cli, 'balances'], { capture: true });
+  const address = /arkade address:\s*(\S+)/.exec(out.stdout)?.[1];
+  if (!address) return warn(`intent-solver float skipped: no address in \`balances\` (${out.stderr || out.stdout})`);
+
+  // Idempotent across restarts: the datadir volume survives `stop`/`start`.
+  if (/arkade balance:[\s\S]*?"available"\s*:\s*(?!0\b)\d+/.test(out.stdout)) {
+    return log('intent-solver already holds Arkade float');
+  }
+
+  log(`Funding intent-solver with ${sats} sats of Arkade float (${address})...`);
+  const send = dockerExec(
+    'arkd',
+    ['ark', 'send', '--to', address, '--amount', sats, '--password', env('ARKD_PASSWORD', 'secret')],
+    { capture: true },
+  );
+  if (send.code !== 0) warn(`intent-solver float failed: ${send.stderr || send.stdout}`);
 }
 
 // The bucket sync server needs no post-boot setup — clients create their own

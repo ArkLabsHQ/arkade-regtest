@@ -99,6 +99,15 @@ jobs:
           # and corridor admission are all live at once.
           curl -sf http://localhost:8787/healthz | jq -e '.ok == true and .network == "regtest"'
 
+          # Arkade float, which `start` sends it. Asserted rather than trusted:
+          # the receive corridors fund lockups out of this, and at 0 the solver
+          # quotes and then cannot fill — a failure that hides behind a healthy
+          # /healthz and a working send-direction quote.
+          docker exec intent-solver node --enable-source-maps --experimental-eventsource \
+            packages/solver-app/dist/cli.js balances > balances.txt 2>&1 || true
+          grep -E 'arkade (address|balance)' balances.txt || { cat balances.txt; exit 1; }
+          grep -qE '"available":[1-9]' balances.txt
+
           # 25000 is interior to regtest's 1000..1000000 corridor limits, and well
           # under the 500000 the lightning profile pushes to `lnd` for outbound.
           invoice=$(docker exec lnd-peer lncli --network=regtest addinvoice --amt 25000 | jq -r '.payment_request')
