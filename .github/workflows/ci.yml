@@ -122,7 +122,10 @@ jobs:
           # 201 is a quote; 400/422 are the refusal shapes, and both fail here.
           test "$code" = "201"
           echo "$quote" | jq -e '.type == "rfq_quote" and .rfq_id == "'"$rfq_id"'"'
-          echo "$quote" | jq -e '.to_amount == "25000"'
+          # `tostring`, because the two amounts are JSON numbers here while
+          # docs/rfq-protocol.md § 4.2 calls them canonical decimal strings.
+          # Tolerating both keeps this green whichever way that is reconciled.
+          echo "$quote" | jq -e '(.to_amount | tostring) == "25000"'
           # The fee lives in the spread, so the client always funds at least the payout.
           echo "$quote" | jq -e '(.from_amount | tonumber) >= (.to_amount | tonumber)'
           echo "$quote" | jq -e '.solver_pubkey | test("^[0-9a-f]{64}$")'
