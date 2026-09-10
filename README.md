@@ -200,13 +200,15 @@ EMULATOR_IMAGE=
 
 It runs in the `intent-solver` profile at `http://localhost:${INTENT_SOLVER_PORT}` (default `8787`), started last so its dependencies are ready. That profile resolves to `ark`, `emulator`, `lightning` **and `nostr`**, matching `PROFILE_DEPS` in `regtest.mjs` and the table above. `lightning` is not optional here: it is the only thing in this repo that funds the base `lnd` node and opens a channel to it, so without it every Lightning corridor would be dead on arrival. Nostr (strfry) comes along because the solver's registry card advertises a relay — it is not how a trader reaches this container, which answers swaps over HTTP. The solver reuses that node rather than adding a second funding path (`lnd:10009`, with the cert and admin macaroon read straight off the `lnd_datadir` volume).
 
-The profile is **off by default**, because the image is not published yet. Name a build in your override file to turn it on:
+The profile is **on by default**, pinned in `.env.defaults`:
 
 ```bash
 INTENT_SOLVER_IMAGE=ghcr.io/arkade-os/intent-solver:0.2.0
 ```
 
-Until then `start` logs `intent-solver disabled (INTENT_SOLVER_IMAGE empty; set it to enable the profile)` and skips it — including in the full-stack default — the same "clear the image to disable it" idiom as `EMULATOR_IMAGE`, in reverse.
+Note the tag has no leading `v`: the solver's `release.yml` renders `type=semver,pattern={{version}}`, so the git tag `v0.2.1` publishes the image tag `0.2.1`. Pin `v0.2.1` and the pull fails.
+
+Clear the variable to turn the profile off — `start` then logs `intent-solver disabled (INTENT_SOLVER_IMAGE empty), skipping...` and carries on, the same "clear the image to disable it" idiom as `EMULATOR_IMAGE`.
 
 It runs the image's `serve` command (an HTTP host) rather than its default `relay` (outbound-only, no port), bound to `0.0.0.0` so the published port is reachable. Liveness is `/healthz`:
 

@@ -91,6 +91,54 @@ jobs:
           echo "== ark client CLI (initialized + funded) =="
           docker exec arkd ark balance | jq -e '.offchain_balance.total > 0'
 
+      - name: Exercise the intent solver (real RFQ quote over HTTP)
+        run: |
+          set -euo pipefail
+          # `start` already gates on /healthz, which only proves a port is bound.
+          # A quote is the round trip that proves the LND link, the Arkade wallet
+          # and corridor admission are all live at once.
+          curl -sf http://localhost:8787/healthz | jq -e '.ok == true and .network == "regtest"'
+
+          # 25000 is interior to regtest's 1000..1000000 corridor limits, and well
+          # under the 500000 the lightning profile pushes to `lnd` for outbound.
+          invoice=$(docker exec lnd-peer lncli --network=regtest addinvoice --amt 25000 | jq -r '.payment_request')
+          refund=$(docker exec arkd ark receive | jq -r '.offchain_address')
+          rfq_id=$(openssl rand -hex 32)
+          # A real curve point — the quote builds a covenant from it, so random
+          # bytes would fault rather than refuse. Same key the signer steps pin.
+          pubkey=e35799157be4b37565bb5afe4d04e6a0fa0a4b6a4f4e48b0d904685d253cdbdb
+
+          body=$(jq -nc --arg inv "$invoice" --arg refund "$refund" --arg pk "$pubkey" --arg id "$rfq_id" '{
+            v: 1, type: "rfq_request", rfq_id: $id,
+            pair: "arkade:BTC->lightning:BTC", amount_side: "to",
+            profile: { invoice: $inv, refund_address: $refund, client_refund_pubkey: $pk }
+          }')
+
+          out=$(curl -s -w $'\n%{http_code}' -X POST http://localhost:8787/v1/swap \
+            -H 'Content-Type: application/json' -d "$body")
+          code=$(printf '%s' "$out" | tail -n1)
+          quote=$(printf '%s' "$out" | sed '$d')
+          echo "POST /v1/swap -> $code: $quote"
+          # 201 is a quote; 400/422 are the refusal shapes, and both fail here.
+          test "$code" = "201"
+          echo "$quote" | jq -e '.type == "rfq_quote" and .rfq_id == "'"$rfq_id"'"'
+          echo "$quote" | jq -e '.to_amount == "25000"'
+          # The fee lives in the spread, so the client always funds at least the payout.
+          echo "$quote" | jq -e '(.from_amount | tonumber) >= (.to_amount | tonumber)'
+          echo "$quote" | jq -e '.solver_pubkey | test("^[0-9a-f]{64}$")'
+          echo "$quote" | jq -e '.valid_until > now'
+
+          # A funding address the client can actually pay — proof a covenant was built.
+          lockup=$(echo "$quote" | jq -r '.profile.lockup_address')
+          echo "$lockup" | grep -q '^tark1'
+
+          # Retrievable by correlation id, and it is the SAME negotiation.
+          status=$(curl -sf "http://localhost:8787/v1/rfq/$rfq_id")
+          echo "GET /v1/rfq/$rfq_id -> $status"
+          echo "$status" | jq -e '.type == "rfq_status" and .rfq_id == "'"$rfq_id"'"'
+          echo "$status" | jq -e '.state == "quoted"'
+          echo "$status" | jq -e '.profile.lockup_address == "'"$lockup"'"'
+
       - name: Exercise a settlement (deep flow — round + on-chain commitment)
         run: |
           set -euo pipefail
