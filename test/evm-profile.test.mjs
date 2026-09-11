@@ -1,0 +1,58 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { DEFAULT_PROFILES, resolveProfiles } from '../lib/profiles.mjs';
+import { containerName } from '../lib/proc.mjs';
+import { receiveRfqRequest, sendRfqRequest } from '../lib/evm.mjs';
+
+test('evm-e2e stays opt-in while resolving its Ark dependencies', () => {
+  assert.equal(DEFAULT_PROFILES.includes('evm-e2e'), false);
+  assert.deepEqual(resolveProfiles(['evm-e2e']), ['evm-e2e', 'ark', 'base', 'emulator']);
+});
+
+test('container names stay backward compatible and can be stack-scoped', () => {
+  assert.equal(containerName('bitcoin', {}), 'bitcoin');
+  assert.equal(
+    containerName('bitcoin', { REGTEST_CONTAINER_PREFIX: 'arkade-regtest-evm-e2e-' }),
+    'arkade-regtest-evm-e2e-bitcoin',
+  );
+});
+
+test('RFQ readiness requests use each EVM direction exact wire shape', () => {
+  const base = {
+    token: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2',
+    arkAddress: 'tark1probe',
+    evmAddress: '0x3c44cddddb6a900fa2b585dd299e03d12fa4293bc',
+    paymentHash: '11'.repeat(32),
+    rfqId: '22'.repeat(32),
+  };
+  assert.deepEqual(sendRfqRequest(base), {
+    v: 1,
+    type: 'rfq_request',
+    rfq_id: base.rfqId,
+    pair: `arkade:BTC->ethereum:${base.token}`,
+    amount_side: 'from',
+    amount: 100_000,
+    profile: {
+      payment_hash: base.paymentHash,
+      evm_claim_address: base.evmAddress,
+      refund_address: base.arkAddress,
+      client_refund_pubkey: '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798',
+    },
+  });
+  assert.deepEqual(receiveRfqRequest({ ...base, timeoutBlock: 900, evmAmount: '1000000000000000' }), {
+    v: 1,
+    type: 'rfq_request',
+    rfq_id: base.rfqId,
+    pair: `ethereum:${base.token}->arkade:BTC`,
+    amount_side: 'from',
+    profile: {
+      payment_hash: base.paymentHash,
+      evm_amount: '1000000000000000',
+      evm_timeout_block: 900,
+      evm_refund_address: base.evmAddress,
+      payout_address: base.arkAddress,
+      payout_pubkey: '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798',
+    },
+  });
+});

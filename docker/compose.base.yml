@@ -14,7 +14,7 @@ services:
   # ── Bitcoin Core (regtest) ─────────────────────────────────────────────────
   bitcoin:
     image: ${BITCOIN_IMAGE:-btcpayserver/bitcoin:31.0}
-    container_name: bitcoin
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}bitcoin
     profiles: ["base"]
     restart: on-failure
     stop_grace_period: 30s
@@ -55,7 +55,7 @@ services:
   # so the (faster) start bootstrap stays deterministic.
   bitcoin-miner:
     image: ${BITCOIN_IMAGE:-btcpayserver/bitcoin:31.0}
-    container_name: bitcoin-miner
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}bitcoin-miner
     profiles: ["base"]
     restart: unless-stopped
     depends_on:
@@ -80,7 +80,7 @@ services:
   # ── Postgres (shared: nbxplorer, arkd and bucket-sync each get a database) ──
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:16}
-    container_name: postgres
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}postgres
     profiles: ["base"]
     restart: unless-stopped
     # Exposed on the host so external consumers can reach the DBs directly — in
@@ -105,7 +105,7 @@ services:
   # ── NBXplorer (arkd-wallet + lnd-peer UTXO indexer) ────────────────────────
   nbxplorer:
     image: ${NBXPLORER_IMAGE:-nicolasdorier/nbxplorer:2.6.7}
-    container_name: nbxplorer
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}nbxplorer
     profiles: ["base"]
     restart: unless-stopped
     depends_on:
@@ -146,7 +146,7 @@ services:
   # ── Fulcrum (Electrum server backing mempool) ──────────────────────────────
   fulcrum:
     image: ${FULCRUM_IMAGE:-cculianu/fulcrum:latest}
-    container_name: fulcrum
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}fulcrum
     profiles: ["base"]
     restart: on-failure
     stop_grace_period: 30s
@@ -173,7 +173,7 @@ services:
   # ── mempool: MariaDB + backend API + web frontend ──────────────────────────
   mempool_mariadb:
     image: ${MARIADB_IMAGE:-mariadb:10.5}
-    container_name: mempool_mariadb
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}mempool_mariadb
     profiles: ["base"]
     restart: on-failure
     stop_grace_period: 1m
@@ -187,7 +187,7 @@ services:
 
   mempool_api:
     image: ${MEMPOOL_BACKEND_IMAGE:-mempool/backend:v3.3.1}
-    container_name: mempool_api
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}mempool_api
     profiles: ["base"]
     user: "1000:1000"
     init: true
@@ -233,7 +233,7 @@ services:
 
   mempool_web:
     image: ${MEMPOOL_FRONTEND_IMAGE:-mempool/frontend:v3.3.1}
-    container_name: mempool_web
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}mempool_web
     profiles: ["base"]
     user: "1000:1000"
     init: true
@@ -251,7 +251,7 @@ services:
   # ── Counterparty Lightning node (lnd-peer opens a channel to this) ─────────
   lnd:
     image: ${LND_IMAGE:-btcpayserver/lnd:v0.19.3-beta}
-    container_name: lnd
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}lnd
     profiles: ["base"]
     restart: unless-stopped
     stop_grace_period: 5m30s

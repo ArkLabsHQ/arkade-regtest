@@ -19,7 +19,7 @@ services:
   # ── arkd wallet (signer + on-chain wallet, backed by nbxplorer) ────────────
   arkd-wallet:
     image: ${ARKD_WALLET_IMAGE:-ghcr.io/arkade-os/arkd-wallet:v0.9.15}
-    container_name: arkd-wallet
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}arkd-wallet
     profiles: ['ark']
     restart: unless-stopped
     # Wait for nbxplorer to be healthy (HTTP port listening) — not just started —
@@ -48,7 +48,7 @@ services:
   # ── arkd (Ark server) ──────────────────────────────────────────────────────
   arkd:
     image: ${ARKD_IMAGE:-ghcr.io/arkade-os/arkd:v0.9.15}
-    container_name: arkd
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}arkd
     profiles: ['ark']
     restart: unless-stopped
     depends_on:
@@ -91,7 +91,7 @@ services:
   lnd-peer:
     image: ${LND_PEER_IMAGE:-${BOLTZ_LND_IMAGE:-btcpayserver/lnd:v0.19.3-beta}}
     restart: unless-stopped
-    container_name: lnd-peer
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}lnd-peer
     profiles: ['lightning']
     networks:
       default:
@@ -139,7 +139,7 @@ services:
   # ── Fulmine delegator (Ark wallet daemon, delegation enabled) ──────────────
   fulmine-delegator:
     image: ${FULMINE_IMAGE:-ghcr.io/arklabshq/fulmine:v0.3.25}
-    container_name: fulmine-delegator
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}fulmine-delegator
     profiles: ['delegate']
     environment:
       - FULMINE_ARK_SERVER=http://arkd:7070
@@ -163,7 +163,7 @@ services:
   # ── Arkade web wallet ──────────────────────────────────────────────────────
   arkade-wallet:
     image: ${WALLET_IMAGE:-ghcr.io/arkade-os/wallet:latest}
-    container_name: arkade-wallet
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}arkade-wallet
     profiles: ['ark']
     ports:
       - '${WALLET_PORT:-3003}:80'
@@ -176,7 +176,7 @@ services:
   # ── Arkade explorer (static web UI, repointed at the local arkd) ───────────
   arkade-explorer:
     image: ${EXPLORER_IMAGE:-ghcr.io/arklabshq/arkade-explorer:latest}
-    container_name: arkade-explorer
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}arkade-explorer
     profiles: ['ark']
     restart: unless-stopped
     depends_on:
@@ -193,7 +193,7 @@ services:
   # ── Emulator (arkade-script signing service) — profile-gated, started last ──
   emulator:
     image: ${EMULATOR_IMAGE:-ghcr.io/arkade-os/emulator:v0.0.6}
-    container_name: emulator
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}emulator
     restart: unless-stopped
     profiles:
       - emulator
@@ -212,7 +212,7 @@ services:
   # ── Pricefeed (mock swap prices for the solver) — profile `solver` ─────────
   pricefeed:
     image: nginx:alpine
-    container_name: pricefeed
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}pricefeed
     profiles: ['solver']
     restart: unless-stopped
     ports:
@@ -228,7 +228,7 @@ services:
   # gateway (7071) is published, remapped to 7271 to avoid arkd's 7070/7071.
   covclaimd:
     image: ${COVCLAIMD_IMAGE:-ghcr.io/arkade-os/covclaimd:v0.0.1-rc.5}
-    container_name: covclaimd
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}covclaimd
     profiles:
       - covclaimd
     restart: unless-stopped
@@ -250,7 +250,7 @@ services:
   # the host ports are remapped (7090/7091) to avoid colliding with arkd.
   solver:
     image: ${SOLVER_IMAGE:-ghcr.io/arkade-os/solver:v0.0.3}
-    container_name: solver
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}solver
     profiles: ['solver']
     restart: unless-stopped
     depends_on:
@@ -275,7 +275,7 @@ services:
   solver-init:
     build: ./solver-init
     image: arkade-regtest/solver-init
-    container_name: solver-init
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}solver-init
     profiles: ['solver-init']
     depends_on:
       - solver
@@ -314,7 +314,7 @@ services:
     # all. Every real start goes through .env.defaults, so pin the version
     # there — not here.
     image: ${INTENT_SOLVER_IMAGE:-ghcr.io/arkade-os/intent-solver:latest}
-    container_name: intent-solver
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}intent-solver
     profiles: ['intent-solver']
     restart: unless-stopped
     command: ['serve']
@@ -392,7 +392,7 @@ services:
   # database has to exist before it boots.
   bucket-sync-initdb:
     image: ${POSTGRES_IMAGE:-postgres:16}
-    container_name: bucket-sync-initdb
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}bucket-sync-initdb
     profiles: ['sync']
     # Explicit: every sibling here is `unless-stopped`, which would restart-loop
     # a container whose job is to exit.
@@ -418,7 +418,7 @@ services:
   # regtest.mjs polls /health from the host instead.
   bucket-sync:
     image: ${BUCKET_SYNC_IMAGE:-ghcr.io/kukks/bucket-sync-server:latest}
-    container_name: bucket-sync
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}bucket-sync
     profiles: ['sync']
     restart: unless-stopped
     depends_on:
@@ -448,7 +448,7 @@ services:
   # named volume, so events survive `stop`/`start` and `clean` drops them.
   strfry:
     image: ${STRFRY_IMAGE:-ghcr.io/hoytech/strfry:latest}
-    container_name: strfry
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}strfry
     profiles: ['nostr']
     restart: unless-stopped
     command: ['relay']

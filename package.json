@@ -13,6 +13,7 @@
   "scripts": {
     "start": "node regtest.mjs start",
     "stop": "node regtest.mjs stop",
-    "clean": "node regtest.mjs clean"
+    "clean": "node regtest.mjs clean",
+    "test": "node --test"
   }
 }

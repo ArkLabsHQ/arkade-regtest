@@ -20,10 +20,12 @@
 //   > full stack.
 //
 // Replaces the old bash scripts + the nigiri binary entirely.
+import { randomBytes } from 'node:crypto';
 import { loadEnv, env } from './lib/env.mjs';
 import { log, warn, fail } from './lib/log.mjs';
 import { ROOT, composeUp, composeStop, composeDown } from './lib/compose.mjs';
-import { docker, dockerExec } from './lib/proc.mjs';
+import { docker, dockerExec, containerName } from './lib/proc.mjs';
+import { DEFAULT_PROFILES, PROFILE_DEPS, resolveProfiles } from './lib/profiles.mjs';
 import { sleep, waitForOrFail, httpOk, fetchJson } from './lib/wait.mjs';
 import { bitcoinCli, bootstrapChain, mine, faucet, reorg } from './lib/chain.mjs';
 import { setupArkd, applyArkdFees } from './lib/setup/arkd.mjs';
@@ -32,46 +34,7 @@ import { setupLightning } from './lib/setup/lightning.mjs';
 import { setupSolver } from './lib/setup/solver.mjs';
 import { createInvoice, payInvoice } from './lib/invoice.mjs';
 import { rotateSigner, setSigners, signerInfo, clearSignerState } from './lib/setup/signer.mjs';
-
-// Each profile's direct prerequisites. resolveProfiles() expands the transitive
-// closure so the orchestrator can enable every profile a target tier needs.
-const PROFILE_DEPS = {
-  base: [],
-  ark: ['base'],
-  delegate: ['ark'], // standalone fulmine-delegator
-  lightning: ['ark'], // lnd-peer, and the channel it opens to the base `lnd`
-  emulator: ['ark'],
-  covclaimd: ['ark', 'emulator'], // non-interactive claim daemon; needs arkd + emulator
-  solver: ['ark', 'emulator'],
-  // arkade-os/intent-solver — the Lightning <-> Arkade swap solver, backed by
-  // the base `lnd`. `lightning` is not optional here: it is the only thing that
-  // funds that node and opens a channel to it, so without it every Lightning
-  // corridor is dead on arrival.
-  //
-  // `nostr` for the solver's registry card, which names a relay a client can
-  // reach it on, and for the ad the admin console can post there. NOT for
-  // swap ingress: under `command: serve` swaps arrive over `POST /v1/swap`
-  // and the process never subscribes to the relay — only `command: relay`
-  // does, and it has no listening swap port. Both transports carry identical
-  // payloads; which one answers is a function of the mode, not the config.
-  'intent-solver': ['ark', 'emulator', 'lightning', 'nostr'],
-  sync: ['base'], // bucket-sync-server — opaque key/value store, no Ark dependency
-  nostr: ['base'], // strfry — a Nostr relay; stores signed events, no Ark dependency
-};
-
-function resolveProfiles(requested) {
-  const out = new Set();
-  const visit = (p) => {
-    if (out.has(p)) return;
-    if (!(p in PROFILE_DEPS)) {
-      fail(`unknown profile "${p}" (valid: ${Object.keys(PROFILE_DEPS).join(', ')})`);
-    }
-    out.add(p);
-    PROFILE_DEPS[p].forEach(visit);
-  };
-  requested.forEach(visit);
-  return [...out];
-}
+import { evmRpc, receiveRfqRequest, sendRfqRequest } from './lib/evm.mjs';
 
 function parseArgs(argv) {
   const opts = { command: argv[0], env: '', clean: false, prune: false, confirm: false, cutoff: undefined, newKey: undefined, active: undefined, deprecated: undefined, profiles: [], positional: [] };
@@ -167,27 +130,119 @@ async function startIntentSolver() {
 // The address cannot be hardcoded even though INTENT_SOLVER_MNEMONIC is fixed:
 // an Arkade address commits to the operator pubkey, which is per-stack. So ask
 // the container, via the same CLI entrypoint the image runs.
-function fundIntentSolver() {
-  const sats = env('INTENT_SOLVER_FLOAT_SATS', '5000000');
+function fundIntentSolver(service = 'intent-solver', sats = env('INTENT_SOLVER_FLOAT_SATS', '5000000')) {
   if (sats === '0') return log('intent-solver float disabled (INTENT_SOLVER_FLOAT_SATS=0)');
 
   const cli = ['node', '--enable-source-maps', '--experimental-eventsource', 'packages/solver-app/dist/cli.js'];
-  const out = dockerExec('intent-solver', [...cli, 'balances'], { capture: true });
+  const out = dockerExec(service, [...cli, 'balances'], { capture: true });
   const address = /arkade address:\s*(\S+)/.exec(out.stdout)?.[1];
-  if (!address) return warn(`intent-solver float skipped: no address in \`balances\` (${out.stderr || out.stdout})`);
+  if (!address) return warn(`${service} float skipped: no address in \`balances\` (${out.stderr || out.stdout})`);
 
   // Idempotent across restarts: the datadir volume survives `stop`/`start`.
   if (/arkade balance:[\s\S]*?"available"\s*:\s*(?!0\b)\d+/.test(out.stdout)) {
-    return log('intent-solver already holds Arkade float');
+    return log(`${service} already holds Arkade float`);
   }
 
-  log(`Funding intent-solver with ${sats} sats of Arkade float (${address})...`);
+  log(`Funding ${service} with ${sats} sats of Arkade float (${address})...`);
   const send = dockerExec(
     'arkd',
     ['ark', 'send', '--to', address, '--amount', sats, '--password', env('ARKD_PASSWORD', 'secret')],
     { capture: true },
   );
-  if (send.code !== 0) warn(`intent-solver float failed: ${send.stderr || send.stdout}`);
+  if (send.code !== 0) warn(`${service} float failed: ${send.stderr || send.stdout}`);
+}
+
+async function startEvmInfrastructure() {
+  log('Starting isolated Anvil, EVM price feed, and runtime initializer...');
+  const up = composeUp(['anvil', 'evm-pricefeed', 'evm-init'], { profiles: ['evm-e2e'] });
+  if (up.code !== 0) fail('EVM infrastructure compose up failed');
+
+  const rpcUrl = `http://localhost:${env('EVM_RPC_PORT', '28545')}`;
+  await waitForOrFail('Anvil chain id 31337', async () => (await evmRpc(rpcUrl, 'eth_chainId')) === '0x7a69');
+  await waitForOrFail('EVM price feed', async () => {
+    const { json } = await fetchJson(`http://localhost:${env('EVM_PRICEFEED_PORT', '28088')}/btc-weth`);
+    return json?.btc?.weth === '1';
+  });
+  let initState;
+  await waitForOrFail('EVM runtime initialization', () => {
+    const state = docker(['inspect', '--format', '{{json .State}}', containerName('evm-init')], { capture: true });
+    if (state.code !== 0) return false;
+    initState = JSON.parse(state.stdout);
+    return initState.Status === 'exited';
+  }, { attempts: 60, intervalMs: 1000 });
+  if (initState.ExitCode !== 0) {
+    const logs = docker(['logs', containerName('evm-init')], { capture: true });
+    fail(`EVM runtime initialization failed: ${logs.stderr || logs.stdout}`);
+  }
+}
+
+function arkProbeAddress() {
+  const result = dockerExec('arkd', ['ark', 'receive'], { capture: true });
+  if (result.code !== 0) fail(`ark probe address failed: ${result.stderr || result.stdout}`);
+  try {
+    const parsed = JSON.parse(result.stdout);
+    const address = parsed.offchain_address || parsed.address || parsed.boarding_address;
+    if (address) return address;
+  } catch {}
+  const address = /\b(?:tark|ark)1[0-9a-z]+\b/.exec(result.stdout)?.[0];
+  if (!address) fail(`ark probe address missing: ${result.stdout}`);
+  return address;
+}
+
+async function assertEvmRfqReady(service, port, direction, arkAddress) {
+  const token = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2';
+  const base = {
+    token,
+    arkAddress,
+    evmAddress: env('EVM_CLIENT_ADDRESS', '0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc'),
+    paymentHash: randomBytes(32).toString('hex'),
+    rfqId: randomBytes(32).toString('hex'),
+  };
+  const request = direction === 'send'
+    ? sendRfqRequest(base)
+    : receiveRfqRequest({
+        ...base,
+        evmAmount: '1000000000000000',
+        timeoutBlock: Number(BigInt(await evmRpc(`http://localhost:${env('EVM_RPC_PORT', '28545')}`, 'eth_blockNumber'))) + 10800,
+      });
+  const { ok, status, json, text } = await fetchJson(`http://localhost:${port}/v1/swap`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  if (!ok || json?.type !== 'rfq_quote' || json?.pair !== request.pair) {
+    fail(`${service} RFQ readiness failed (${status}): ${JSON.stringify(json || text)}`);
+  }
+  log(`${service} RFQ ready: ${JSON.stringify(json)}`);
+}
+
+async function assertEvmCard(service, port, pair) {
+  const { ok, status, json, text } = await fetchJson(`http://localhost:${port}/api/card`);
+  if (!ok || !json?.cardOmitted?.some((note) => note.startsWith(`${pair} is served`))) {
+    fail(`${service} card readiness failed (${status}): ${JSON.stringify(json || text)}`);
+  }
+  log(`${service} card ready: ${JSON.stringify(json)}`);
+}
+
+async function startEvmSolvers() {
+  const services = ['intent-solver-evm-send', 'intent-solver-evm-receive'];
+  log('Starting direction-isolated EVM solvers...');
+  const up = composeUp(services, { profiles: ['evm-e2e'] });
+  if (up.code !== 0) fail('EVM solver compose up failed');
+  const sendPort = env('EVM_SEND_SOLVER_PORT', '28787');
+  const receivePort = env('EVM_RECEIVE_SOLVER_PORT', '28788');
+  const sendAdminPort = env('EVM_SEND_SOLVER_ADMIN_PORT', '28789');
+  const receiveAdminPort = env('EVM_RECEIVE_SOLVER_ADMIN_PORT', '28790');
+  await waitForOrFail('EVM send solver /healthz', () => httpOk(`http://localhost:${sendPort}/healthz`), { attempts: 60, intervalMs: 2000 });
+  await waitForOrFail('EVM receive solver /healthz', () => httpOk(`http://localhost:${receivePort}/healthz`), { attempts: 60, intervalMs: 2000 });
+  fundIntentSolver(services[0]);
+  fundIntentSolver(services[1]);
+  const address = arkProbeAddress();
+  const token = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2';
+  await assertEvmCard(services[0], sendAdminPort, `arkade:BTC->ethereum:${token}`);
+  await assertEvmCard(services[1], receiveAdminPort, `ethereum:${token}->arkade:BTC`);
+  await assertEvmRfqReady(services[0], sendPort, 'send', address);
+  await assertEvmRfqReady(services[1], receivePort, 'receive', address);
 }
 
 // The bucket sync server needs no post-boot setup — clients create their own
@@ -251,6 +306,12 @@ function banner(active) {
   if (active.has('intent-solver')) {
     lines.push(`  Intent solver   http://localhost:${env('INTENT_SOLVER_PORT', '8787')}  (swap solver; LN backend: lnd)`);
   }
+  if (active.has('evm-e2e')) {
+    lines.push(`  Anvil           http://localhost:${env('EVM_RPC_PORT', '28545')}  (chain 31337)`);
+    lines.push(`  EVM pricefeed   http://localhost:${env('EVM_PRICEFEED_PORT', '28088')}/btc-weth`);
+    lines.push(`  EVM send        http://localhost:${env('EVM_SEND_SOLVER_PORT', '28787')}  (admin :${env('EVM_SEND_SOLVER_ADMIN_PORT', '28789')})`);
+    lines.push(`  EVM receive     http://localhost:${env('EVM_RECEIVE_SOLVER_PORT', '28788')}  (admin :${env('EVM_RECEIVE_SOLVER_ADMIN_PORT', '28790')})`);
+  }
   if (active.has('sync')) {
     lines.push(`  Bucket Sync     http://localhost:${env('BUCKET_SYNC_PORT', '7100')}  (DB: ${env('BUCKET_SYNC_DB', 'bucketsync')})`);
   }
@@ -277,7 +338,7 @@ async function start(opts) {
   // Default to every resolvable tier (base..solver). Not ALL_PROFILES: that set
   // also carries solver-init, a one-shot init container run on demand inside
   // setupSolver() — it is not a startable tier and resolveProfiles() rejects it.
-  const requested = opts.profiles.length ? opts.profiles : fromEnv.length ? fromEnv : Object.keys(PROFILE_DEPS);
+  const requested = opts.profiles.length ? opts.profiles : fromEnv.length ? fromEnv : DEFAULT_PROFILES;
   const active = new Set(resolveProfiles(requested));
 
   // Emulator opt-out: clearing EMULATOR_IMAGE disables it — and the solver +
@@ -312,7 +373,7 @@ async function start(opts) {
   // for the whole of arkd + boltz setup. startIntentSolver() brings it up on its
   // own, last, and waits on /healthz. Nothing else depends on it and it declares
   // no depends_on of its own, so holding its profile back costs nothing.
-  const waveProfiles = profiles.filter((p) => p !== 'intent-solver');
+  const waveProfiles = profiles.filter((p) => p !== 'intent-solver' && p !== 'evm-e2e');
 
   // Stagger startup when the closure is more than just base. Bringing up all
   // ~18 containers at once overwhelms Docker's embedded DNS (arkd <-> arkd-wallet
@@ -355,6 +416,10 @@ async function start(opts) {
   if (active.has('covclaimd')) await startCovclaimd();
   if (active.has('solver')) await setupSolver();
   if (active.has('intent-solver')) await startIntentSolver();
+  if (active.has('evm-e2e')) {
+    await startEvmInfrastructure();
+    await startEvmSolvers();
+  }
   // Apply the configured arkd intent fees last — every wallet above settles/
   // redeems with fees zeroed, so this must run after all of them.
   if (active.has('ark')) await applyArkdFees();
@@ -369,7 +434,7 @@ async function stop() {
 }
 
 async function clean(opts) {
-  log('Removing arkade-regtest containers and volumes...');
+  log(`Removing ${env('REGTEST_PROJECT', 'arkade-regtest')} containers and volumes...`);
   composeDown({ volumes: true });
   // arkd-wallet's volume is gone, so the persisted signer set no longer applies.
   clearSignerState();
@@ -383,11 +448,14 @@ async function clean(opts) {
 
 async function main() {
   const argv = process.argv.slice(2);
+  const opts = parseArgs(argv);
+  loadEnv(ROOT, opts.env);
+  const passthrough = argv.slice(1).filter((arg, index, args) => arg !== '--env' && args[index - 1] !== '--env');
 
   // `ark` / `arkd` are raw passthroughs into the arkd container, so forward
   // every following token verbatim (flags included) without our own parsing.
   if (argv[0] === 'ark' || argv[0] === 'arkd') {
-    const res = docker(['exec', 'arkd', ...argv]); // argv[0] is the binary name in the container
+    const res = docker(['exec', containerName('arkd'), argv[0], ...passthrough]);
     process.exitCode = res.code;
     return;
   }
@@ -397,19 +465,14 @@ async function main() {
   // `bitcoin-cli -regtest … getblockcount`, keeping downstream migrations a
   // find-replace (`nigiri rpc …` → `node regtest.mjs rpc …`, same arg shape).
   if (argv[0] === 'rpc') {
-    const res = docker(['exec', 'bitcoin', 'bitcoin-cli', '-regtest', '-rpcuser=admin1', '-rpcpassword=123', ...argv.slice(1)]);
+    const res = docker(['exec', containerName('bitcoin'), 'bitcoin-cli', '-regtest', '-rpcuser=admin1', '-rpcpassword=123', ...passthrough]);
     process.exitCode = res.code;
     return;
   }
 
-  const opts = parseArgs(argv);
   if (!opts.command) {
     fail('usage: node regtest.mjs <start|stop|clean|faucet|mine|reorg|rpc|ark|arkd|rotate-signer|set-signers|signer-info> [options]');
   }
-
-  // faucet/mine act on a running node and don't need override discovery, but
-  // loading env is harmless and keeps ports/keys consistent.
-  loadEnv(ROOT, opts.env);
 
   switch (opts.command) {
     case 'start':
