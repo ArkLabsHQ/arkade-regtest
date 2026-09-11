@@ -42,6 +42,34 @@ test('rendered EVM solvers keep quotes valid through checkout safety headroom', 
   }
 });
 
+test('rendered Ark VTXOs outlive three ingress refund horizons', () => {
+  const output = execFileSync(
+    'docker',
+    [
+      'compose',
+      '--env-file', join(root, '.env.defaults'),
+      '--env-file', join(root, '.env.evm-e2e'),
+      '-f', join(root, 'docker', 'compose.base.yml'),
+      '-f', join(root, 'docker', 'compose.ark.yml'),
+      '-f', join(root, 'docker', 'compose.evm.yml'),
+      '--profile', 'base',
+      '--profile', 'ark',
+      '--profile', 'emulator',
+      '--profile', 'evm-e2e',
+      'config',
+      '--format', 'json',
+    ],
+    { encoding: 'utf8' },
+  );
+  const treeExpirySeconds = Number(JSON.parse(output).services.arkd.environment.ARKD_VTXO_TREE_EXPIRY);
+  const ingressRefundHorizonSeconds = 7_200;
+
+  assert.ok(
+    treeExpirySeconds >= ingressRefundHorizonSeconds * 3,
+    `Ark VTXO lifetime ${treeExpirySeconds} must cover three ${ingressRefundHorizonSeconds}s refund horizons`,
+  );
+});
+
 test('RFQ readiness requests use each EVM direction exact wire shape', () => {
   const base = {
     token: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2',
