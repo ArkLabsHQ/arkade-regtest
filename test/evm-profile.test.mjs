@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { DEFAULT_PROFILES, resolveProfiles } from '../lib/profiles.mjs';
 import { containerName } from '../lib/proc.mjs';
 import { receiveRfqRequest, sendRfqRequest } from '../lib/evm.mjs';
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 test('evm-e2e stays opt-in while resolving its Ark dependencies', () => {
   assert.equal(DEFAULT_PROFILES.includes('evm-e2e'), false);
@@ -16,6 +21,25 @@ test('container names stay backward compatible and can be stack-scoped', () => {
     containerName('bitcoin', { REGTEST_CONTAINER_PREFIX: 'arkade-regtest-evm-e2e-' }),
     'arkade-regtest-evm-e2e-bitcoin',
   );
+});
+
+test('rendered EVM solvers keep quotes valid through checkout safety headroom', () => {
+  const output = execFileSync(
+    'docker',
+    ['compose', '-f', join(root, 'docker', 'compose.evm.yml'), '--profile', 'evm-e2e', 'config', '--format', 'json'],
+    { encoding: 'utf8' },
+  );
+  const services = JSON.parse(output).services;
+
+  for (const name of ['intent-solver-evm-send', 'intent-solver-evm-receive']) {
+    const environment = services[name].environment;
+    const quoteValiditySeconds = Number(environment.EVM_QUOTE_VALIDITY_SECONDS);
+    const requiredSeconds = Number(environment.EVM_FEE_HEADROOM_SECONDS) + 60;
+    assert.ok(
+      quoteValiditySeconds >= requiredSeconds,
+      `${name} quote validity ${quoteValiditySeconds} must cover ${requiredSeconds} seconds`,
+    );
+  }
 });
 
 test('RFQ readiness requests use each EVM direction exact wire shape', () => {
