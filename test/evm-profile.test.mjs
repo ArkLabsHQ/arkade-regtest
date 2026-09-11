@@ -42,6 +42,25 @@ test('rendered EVM solvers keep quotes valid through checkout safety headroom', 
   }
 });
 
+test('rendered EVM send quotes exceed the client recourse margin', () => {
+  const output = execFileSync(
+    'docker',
+    ['compose', '-f', join(root, 'docker', 'compose.evm.yml'), '--profile', 'evm-e2e', 'config', '--format', 'json'],
+    { encoding: 'utf8' },
+  );
+  const services = JSON.parse(output).services;
+  const clientMarginSeconds = 7_200;
+  const clockDriftHeadroomSeconds = 300;
+
+  for (const name of ['intent-solver-evm-send', 'intent-solver-evm-receive']) {
+    const quotedMarginSeconds = Number(services[name].environment.EVM_ORDER_MARGIN_SECONDS);
+    assert.ok(
+      quotedMarginSeconds >= clientMarginSeconds + clockDriftHeadroomSeconds,
+      `${name} quote margin ${quotedMarginSeconds} must exceed the client margin by ${clockDriftHeadroomSeconds}s`,
+    );
+  }
+});
+
 test('rendered Ark VTXOs outlive three ingress refund horizons', () => {
   const output = execFileSync(
     'docker',
