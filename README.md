@@ -81,6 +81,7 @@ Services are grouped into compose profiles so you can bring up just the tier you
 | `emulator`      | emulator                                                          | `ark`                      |
 | `solver`        | solver, pricefeed                                                 | `ark`, `emulator`          |
 | `intent-solver` | intent-solver                                                     | `ark`, `emulator`, `lightning`, `nostr` |
+| `evm-e2e`       | anvil, evm-pricefeed, evm-init, intent-solver-evm-send, intent-solver-evm-receive | `ark`, `emulator`          |
 | `sync`          | bucket-sync, bucket-sync-initdb                                   | `base`                     |
 | `nostr`         | strfry                                                            | `base`                     |
 
@@ -91,6 +92,7 @@ node regtest.mjs start --profile ark        # base + ark (incl. web wallet + exp
 node regtest.mjs start --profile lightning  # base + ark + lnd-peer, channel opened and balanced
 node regtest.mjs start --profile solver     # base + ark + emulator + solver
 node regtest.mjs start --profile intent-solver   # base + ark + emulator + lightning + nostr + the swap solver
+node regtest.mjs start --profile evm-e2e    # base + ark + emulator + EVM swap solvers (Anvil + ERC20Swap)
 node regtest.mjs start --profile sync       # base + bucket sync server (no arkd)
 node regtest.mjs start --profile nostr      # base + strfry Nostr relay (no arkd)
 node regtest.mjs start --profile emulator --profile lightning   # combine targets
@@ -115,6 +117,28 @@ Variables in the override file replace their `.env.defaults` counterparts; unspe
 ### Host ports
 
 Every host-exposed port is configurable via `${VAR:-default}` so you can avoid local collisions or run multiple stacks side by side — only the host side is remapped; container-internal ports stay fixed. Base layer: `BITCOIN_RPC_PORT` (18443), `BITCOIN_P2P_PORT` (18444), `BITCOIN_ZMQ_BLOCK_PORT` (28332), `BITCOIN_ZMQ_TX_PORT` (28333), `NBXPLORER_PORT` (32838), `POSTGRES_PORT` (39372), `FULCRUM_TCP_PORT` (50001), `FULCRUM_WS_PORT` (50003), `LND_P2P_PORT` (9735), `LND_RPC_PORT` (10009), `MEMPOOL_WEB_PORT` (3000). Ark layer: `ARKD_PORT` (7070), `ARKD_ADMIN_PORT` (7071), `ARKD_WALLET_PORT` (6060), plus the existing peer-LND/delegator/solver port vars. The CLI reads `ARKD_PORT`/`ARKD_ADMIN_PORT` itself, so overriding them keeps `start`'s arkd setup pointed at the right host ports.
+
+### Container name prefix (multi-stack isolation)
+
+Set `REGTEST_CONTAINER_PREFIX` (e.g. `arkade-regtest-evm-e2e-`) to namespace **all container names** for a given stack. This lets you run multiple independent regtest environments on the same Docker host without name collisions. The prefix is applied by the CLI's `containerName()` helper to every service, so `docker exec`, logs, and Compose operations all target the correct namespaced container.
+
+Combine with a unique `REGTEST_PROJECT` (Docker Compose project name) and a dedicated port range (via an env file like `.env.evm-e2e`) for full isolation:
+
+```bash
+# .env.evm-e2e example
+REGTEST_PROJECT=arkade-regtest-evm-e2e
+REGTEST_CONTAINER_PREFIX=arkade-regtest-evm-e2e-
+REGTEST_PROFILES=evm-e2e
+# ... non-overlapping port assignments ...
+```
+
+Then start with:
+
+```bash
+node regtest.mjs start --env .env.evm-e2e
+```
+
+The default stack uses no prefix (empty string) and the default `arkade-regtest` project name, preserving backward compatibility.
 
 ### Custom arkd version
 
@@ -280,30 +304,86 @@ STRFRY_IMAGE=ghcr.io/hoytech/strfry@sha256:<digest>   # in your override file
 
 > **Relay clients must speak Nostr.** The relay only accepts NIP-01 frames (`["EVENT", …]`, `["REQ", …]`, `["CLOSE", …]`) carrying schnorr-signed events. A client using its own JSON framing over the same websocket will connect and then have every frame silently dropped. `lightning-swap-service` ships both dialects behind one codec seam and defaults to Nostr, so point it here with `RELAY_PROTOCOL=nostr RELAY_URL=ws://localhost:7777`; its `dev` framing is for its own mock relay, not for this one.
 
+### EVM swap solvers (Anvil + ERC20Swap)
+
+The `evm-e2e` profile provides an isolated Anvil + ERC20Swap topology for client-side composed swap testing. It runs two independent intent-solver instances against the same Arkade regtest stack — one for **Ark → EVM (send)** and one for **EVM → Ark (receive)** — sharing a payment hash for client-side composition. Quote legs remain independent; the client composes them.
+
+It uses the `REGTEST_CONTAINER_PREFIX` mechanism to namespace all containers (`arkade-regtest-evm-e2e-<service>`) and a dedicated port range (`.env.evm-e2e`) so it can run side-by-side with the default stack.
+
+```bash
+# Start the EVM E2E stack using the dedicated env file
+node regtest.mjs start --env .env.evm-e2e
+
+# Or pin the profile via REGTEST_PROFILES in your override
+# REGTEST_PROFILES=evm-e2e
+# node regtest.mjs start --env .env.evm-e2e
+```
+
+The profile includes:
+
+- **Anvil** (Foundry) at `http://localhost:28545` — chain ID 31337, 1s block time, pre-funded with the canonical Hardhat/Foundry accounts
+- **ERC20Swap** contract deployed at `0x00000000000000000000000000000000deadbeef` (deterministic via `anvil_setCode`), with WETH9 at `0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2`
+- **evm-pricefeed** (nginx) at `http://localhost:28088/btc/weth` — serves a static BTC/WETH price for the solver
+- **intent-solver-evm-send** at `http://localhost:28787` — quotes `arkade:BTC → ethereum:WETH` (send leg)
+- **intent-solver-evm-receive** at `http://localhost:28788` — quotes `ethereum:WETH → arkade:BTC` (receive leg)
+
+Key environment variables (from `.env.evm-e2e`):
+
+| Variable | Value | Purpose |
+| -------- | ----- | ------- |
+| `REGTEST_CONTAINER_PREFIX` | `arkade-regtest-evm-e2e-` | Namespaces all containers to avoid collisions |
+| `REGTEST_PROJECT` | `arkade-regtest-evm-e2e` | Docker Compose project name |
+| `EVM_ORDER_MARGIN_SECONDS` | `7500` | Solver quote margin = client recourse (7200) + clock drift headroom (300) |
+| `EVM_QUOTE_VALIDITY_SECONDS` | `300` | Quote TTL, exceeds checkout safety floor (`EVM_FEE_HEADROOM_SECONDS + 60`) |
+| `ARKD_VTXO_TREE_EXPIRY` | `21600` | VTXO lifetime covers 3× ingress refund horizons (3 × 7200s) |
+| `AUTOMINE_INTERVAL` | `0` | Disables auto-miner for deterministic block-denominated expiry |
+
+The ERC20Swap bytecode (`docker/evm/erc20swap.runtime.hex`) was captured with `eth_getCode` from the live Arbitrum deployment at `0x6398B76DF91C5eBe9f488e3656658E79284dDc0F` (Boltz `ERC20Swap.sol` at `a932d49c`, Solidity 0.8.33, 10M optimizer runs). The `evm-init` one-shot container verifies the deployed code hashes match before proceeding.
+
+Client SDKs compose swaps by requesting quotes from both solvers using the **same payment hash**:
+
+```bash
+# Send leg: Ark -> EVM
+curl -X POST http://localhost:28787/rfq \
+  -H 'Content-Type: application/json' \
+  -d '{"v":1,"type":"rfq_request","rfq_id":"...","pair":"arkade:BTC->ethereum:WETH","amount_side":"from","amount":100000,"profile":{"payment_hash":"<shared>","evm_claim_address":"0x...","refund_address":"tark1...","client_refund_pubkey":"..."}}'
+
+# Receive leg: EVM -> Ark
+curl -X POST http://localhost:28788/rfq \
+  -H 'Content-Type: application/json' \
+  -d '{"v":1,"type":"rfq_request","rfq_id":"...","pair":"ethereum:WETH->arkade:BTC","amount_side":"from","amount":100000,"profile":{"payment_hash":"<shared>","evm_amount":"...","evm_timeout_block":900,"evm_refund_address":"0x...","payout_address":"tark1...","payout_pubkey":"..."}}'
+```
+
 ## Service URLs
 
-| Service            | URL / endpoint                         | Default port |
-| ------------------ | -------------------------------------- | ------------ |
-| Bitcoin Core RPC   | `localhost:18443` (admin1 / 123)       | 18443        |
-| Mempool explorer   | `http://localhost:3000`                | 3000         |
-| Esplora REST API   | `http://localhost:3000/api`            | 3000         |
-| Fulcrum (Electrum) | `localhost:50001` (TCP), `localhost:50003` (WS) | 50001 / 50003 |
-| NBXplorer          | `http://localhost:32838`               | 32838        |
-| Postgres           | `localhost:39372` (trust; DBs: arkd, nbxplorer, bucketsync) | 39372 |
-| Arkd               | `http://localhost:7070` (admin `7071`) | 7070         |
-| Arkd Wallet        | `http://localhost:6060`                | 6060         |
-| Delegator API      | `http://localhost:7011`                | 7011         |
-| Counterparty LND   | `localhost:10009` (gRPC)               | 10009        |
-| Peer LND (`lnd-peer`) | `localhost:10010` (gRPC)            | 10010        |
-| Web wallet         | `http://localhost:3003`                | 3003         |
-| Arkade explorer    | `http://localhost:7080`                | 7080         |
-| Emulator           | `http://localhost:7073`                | 7073         |
-| Solver HTTP        | `http://localhost:7091`                | 7091         |
-| Solver gRPC        | `localhost:7090`                       | 7090         |
-| Pricefeed          | `http://localhost:8088`                | 8088         |
-| Intent solver      | `http://localhost:8787` (`/healthz`)   | 8787         |
-| Bucket sync server | `http://localhost:7100`                | 7100         |
-| strfry (Nostr)     | `ws://localhost:7777` (NIP-11 over `http://`) | 7777  |
+| Service                    | URL / endpoint                                | Default port | EVM-E2E port |
+| -------------------------- | --------------------------------------------- | ------------ | ------------ |
+| Bitcoin Core RPC           | `localhost:18443` (admin1 / 123)              | 18443        | 28443        |
+| Mempool explorer           | `http://localhost:3000`                       | 3000         | 23000        |
+| Esplora REST API           | `http://localhost:3000/api`                   | 3000         | 23000        |
+| Fulcrum (Electrum)         | `localhost:50001` (TCP), `localhost:50003` (WS) | 50001 / 50003 | 51001 / 51003 |
+| NBXplorer                  | `http://localhost:32838`                      | 32838        | 42838        |
+| Postgres                   | `localhost:39372` (trust; DBs: arkd, nbxplorer, bucketsync) | 39372 | 49372 |
+| Arkd                       | `http://localhost:7070` (admin `7071`)        | 7070         | 27070        |
+| Arkd Wallet                | `http://localhost:6060`                       | 6060         | 26060        |
+| Delegator API              | `http://localhost:7011`                       | 7011         | 27011        |
+| Counterparty LND           | `localhost:10009` (gRPC)                      | 10009        | 20009        |
+| Peer LND (`lnd-peer`)      | `localhost:10010` (gRPC)                      | 10010        | 20010        |
+| Web wallet                 | `http://localhost:3003`                       | 3003         | 23003        |
+| Arkade explorer            | `http://localhost:7080`                       | 7080         | 27080        |
+| Emulator                   | `http://localhost:7073`                       | 7073         | 27073        |
+| Solver HTTP                | `http://localhost:7091`                       | 7091         | —            |
+| Solver gRPC                | `localhost:7090`                              | 7090         | —            |
+| Pricefeed                  | `http://localhost:8088`                       | 8088         | —            |
+| Intent solver (LN swaps)   | `http://localhost:8787` (`/healthz`)          | 8787         | —            |
+| **Anvil (EVM RPC)**        | `http://localhost:8545`                       | —            | 28545        |
+| **EVM Pricefeed**          | `http://localhost:8088/btc/weth`              | —            | 28088        |
+| **Intent solver (EVM send)** | `http://localhost:8787` (`/healthz`)        | —            | 28787        |
+| **Intent solver (EVM recv)** | `http://localhost:8787` (`/healthz`)        | —            | 28788        |
+| Bucket sync server         | `http://localhost:7100`                       | 7100         | —            |
+| strfry (Nostr)             | `ws://localhost:7777` (NIP-11 over `http://`) | 7777         | —            |
+
+> **EVM-E2E ports** are used when starting with `--env .env.evm-e2e` (or any override that sets the port variables). The default stack uses the "Default port" column.
 
 ## Using as a git submodule
 
