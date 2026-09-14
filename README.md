@@ -81,6 +81,7 @@ Services are grouped into compose profiles so you can bring up just the tier you
 | `emulator`      | emulator                                                          | `ark`                      |
 | `solver`        | solver, pricefeed                                                 | `ark`, `emulator`          |
 | `intent-solver` | intent-solver                                                     | `ark`, `emulator`, `lightning`, `nostr` |
+| `lnurl`         | lnurl-server                                                      | `ark`, `emulator`, `covclaimd`, `intent-solver`, `nostr` |
 | `evm-e2e`       | anvil, evm-pricefeed, evm-init, intent-solver-evm-send, intent-solver-evm-receive | `ark`, `emulator`          |
 | `sync`          | bucket-sync, bucket-sync-initdb                                   | `base`                     |
 | `nostr`         | strfry                                                            | `base`                     |
@@ -92,6 +93,7 @@ node regtest.mjs start --profile ark        # base + ark (incl. web wallet + exp
 node regtest.mjs start --profile lightning  # base + ark + lnd-peer, channel opened and balanced
 node regtest.mjs start --profile solver     # base + ark + emulator + solver
 node regtest.mjs start --profile intent-solver   # base + ark + emulator + lightning + nostr + the swap solver
+node regtest.mjs start --profile lnurl           # ... + covclaimd + LNURL-pay/LN-address server with offline receives
 node regtest.mjs start --profile evm-e2e    # base + ark + emulator + EVM swap solvers (Anvil + ERC20Swap)
 node regtest.mjs start --profile sync       # base + bucket sync server (no arkd)
 node regtest.mjs start --profile nostr      # base + strfry Nostr relay (no arkd)
@@ -116,7 +118,7 @@ Variables in the override file replace their `.env.defaults` counterparts; unspe
 
 ### Host ports
 
-Every host-exposed port is configurable via `${VAR:-default}` so you can avoid local collisions or run multiple stacks side by side — only the host side is remapped; container-internal ports stay fixed. Base layer: `BITCOIN_RPC_PORT` (18443), `BITCOIN_P2P_PORT` (18444), `BITCOIN_ZMQ_BLOCK_PORT` (28332), `BITCOIN_ZMQ_TX_PORT` (28333), `NBXPLORER_PORT` (32838), `POSTGRES_PORT` (39372), `FULCRUM_TCP_PORT` (50001), `FULCRUM_WS_PORT` (50003), `LND_P2P_PORT` (9735), `LND_RPC_PORT` (10009), `MEMPOOL_WEB_PORT` (3000). Ark layer: `ARKD_PORT` (7070), `ARKD_ADMIN_PORT` (7071), `ARKD_WALLET_PORT` (6060), plus the existing peer-LND/delegator/solver port vars. The CLI reads `ARKD_PORT`/`ARKD_ADMIN_PORT` itself, so overriding them keeps `start`'s arkd setup pointed at the right host ports.
+Every host-exposed port is configurable via `${VAR:-default}` so you can avoid local collisions or run multiple stacks side by side — only the host side is remapped; container-internal ports stay fixed. Base layer: `BITCOIN_RPC_PORT` (18443), `BITCOIN_P2P_PORT` (18444), `BITCOIN_ZMQ_BLOCK_PORT` (28332), `BITCOIN_ZMQ_TX_PORT` (28333), `NBXPLORER_PORT` (32838), `POSTGRES_PORT` (39372), `FULCRUM_TCP_PORT` (50001), `FULCRUM_WS_PORT` (50003), `LND_P2P_PORT` (9735), `LND_RPC_PORT` (10009), `MEMPOOL_WEB_PORT` (3000). Ark layer: `ARKD_PORT` (7070), `ARKD_ADMIN_PORT` (7071), `ARKD_WALLET_PORT` (6060), plus the existing peer-LND/delegator/solver/lnurl port vars. The CLI reads `ARKD_PORT`/`ARKD_ADMIN_PORT` itself, so overriding them keeps `start`'s arkd setup pointed at the right host ports.
 
 ### Container name prefix (multi-stack isolation)
 
@@ -246,6 +248,28 @@ Its Arkade wallet is derived from `INTENT_SOLVER_MNEMONIC`, fixed in `.env.defau
 
 > **Two explorers, and both are set.** The two chains are watched by different clients with different defaults, so one knob is not enough. `LND_ESPLORA_URL` points the Lightning side at mempool; `ARK_ESPLORA_URL` points the Arkade wallet there too. Leave the second unset and the SDK falls back to its regtest default `http://localhost:3000/api` — which, inside the container, is the container. The solver then logs `Failed to fetch chain tip; height-based expiry will not be evaluated` once and keeps serving, so the stack reads healthy while block-denominated VTXO expiry goes unwatched. This was a real gap until the knob shipped in [arkade-os/intent-solver@5fd1677](https://github.com/arkade-os/intent-solver/commit/5fd1677); the profile sets it.
 
+### LNURL server (LNURL-pay + LN addresses)
+
+[ArkLabsHQ/lnurl-server](https://github.com/ArkLabsHQ/lnurl-server) runs in the `lnurl` profile at `http://localhost:${LNURL_PORT}` (default `9090`). It relays LNURL-pay sessions for online wallets over SSE and serves LN addresses on the bootstrap domain (`user@localhost` out of the box, no setup), plus server-orchestrated offline receives through the intent-solver corridor (`lightning:BTC -> arkade:BTC`): the wallet registers an Arkade receive identity once and gets paid while offline, with settlement polling over LUD-21 `verify`.
+
+The profile is **on by default**, pinned in `.env.defaults`:
+
+```bash
+LNURL_IMAGE=ghcr.io/arklabshq/lnurl-server:0.3.0
+```
+
+Clear the variable to turn the profile off. State lives in the `lnurl_datadir` volume (SQLite at `/data/lnurl.sqlite`), so sessions, addresses and accepted swaps survive `stop`/`start` and `clean` drops them with everything else.
+
+Offline discovery needs the solver's registry card, which no image ships — so `start` asks the running solver for its signed card (`card regtest`) and writes it to `docker/.lnurl-solver-cards.json` (gitignored, regenerated every start, deleted on `clean`), mounted read-only as the service's `SOLVER_CARDS_FILE`. The file keeps the solver's identity, markets and signature and only adapts the relays: the card schema admits `wss://` only while the stack's strfry terminates no TLS, so the generator emits with the scheme upgraded and writes the dialable `ws://` value both sides actually use (from `INTENT_SOLVER_RELAY_URL`). Override `LNURL_CARDS_FILE` to pin your own file; when the card cannot be obtained the file is written as `[]` and only the relay flow comes up. `/readyz` is `200` only once that card yields a lightning-receive candidate, so readiness already proves the card, the market IDs and the offline trio (`COVCLAIMD_URL`, `ARK_SERVER_URL`):
+
+```bash
+curl -s http://localhost:9090/readyz | jq .components.solverDiscovery
+```
+
+> **Live offline quotes need the solver's Nostr ingress.** The stack's solver runs the HTTP `serve` mode, which answers no Nostr RFQs — and the server's corridor client negotiates over Nostr only. Relay flow and offline discovery come up verified; an offline invoice request fails at the Nostr round trip until the solver runs its `relay` mode instead (a one-line `command:` override on `intent-solver`, at the cost of its HTTP API and every probe that hits it).
+
+The admin UI (port `3001` in the container) is not published; the relay flow needs no admin access. To browse discovery status or paste cards by hand, add a `ports` entry for the service in a raw compose override.
+
 ### Bucket sync server (encrypted backup / restore / sync)
 
 The [bucket-sync-server](https://github.com/Kukks/bucket-sync-server) runs in the `sync` profile at `http://localhost:${BUCKET_SYNC_PORT}` (default `7100`). It's a schema-agnostic, end-to-end-encrypted key/value **bucket** store: clients encrypt before they upload, so the server only ever holds opaque ciphertext. That means it has no Ark dependency — `sync` resolves to `base` alone, and `--profile sync` gives you the chain plus a sync server without booting arkd.
@@ -359,7 +383,7 @@ curl -X POST http://localhost:28788/rfq \
 | Service                    | URL / endpoint                                | Default port | EVM-E2E port |
 | -------------------------- | --------------------------------------------- | ------------ | ------------ |
 | Bitcoin Core RPC           | `localhost:18443` (admin1 / 123)              | 18443        | 28443        |
-| Mempool explorer           | `http://localhost:3000`                       | 3000         | 23000        |
+| Mempool explorer           | `http://localhost:3000`                       | 3000         | 23000       |
 | Esplora REST API           | `http://localhost:3000/api`                   | 3000         | 23000        |
 | Fulcrum (Electrum)         | `localhost:50001` (TCP), `localhost:50003` (WS) | 50001 / 50003 | 51001 / 51003 |
 | NBXplorer                  | `http://localhost:32838`                      | 32838        | 42838        |
@@ -376,6 +400,7 @@ curl -X POST http://localhost:28788/rfq \
 | Solver gRPC                | `localhost:7090`                              | 7090         | —            |
 | Pricefeed                  | `http://localhost:8088`                       | 8088         | —            |
 | Intent solver (LN swaps)   | `http://localhost:8787` (`/healthz`)          | 8787         | —            |
+| LNURL server               | `http://localhost:9090` (`/livez`, `/readyz`) | 9090         | —            |
 | **Anvil (EVM RPC)**        | `http://localhost:8545`                       | —            | 28545        |
 | **EVM Pricefeed**          | `http://localhost:8088/btc/weth`              | —            | 28088        |
 | **Intent solver (EVM send)** | `http://localhost:8787` (`/healthz`)        | —            | 28787        |

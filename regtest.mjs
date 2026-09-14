@@ -14,6 +14,7 @@
 // Profiles (and their dependencies) let you bring up a subset of the stack:
 //   ark → base,  delegate → ark,  lightning → ark,  emulator → ark,
 //   solver → ark + emulator,  intent-solver → ark + emulator + lightning + nostr,
+//   lnurl → ark + emulator + covclaimd + intent-solver + nostr,
 //   sync → base,  nostr → base. `--profile lightning` brings up base+ark+lnd-peer;
 //   `--profile sync` / `--profile nostr` skip the Ark stack entirely.
 //   Selection precedence: --profile flags > REGTEST_PROFILES env (comma-list)
@@ -32,6 +33,7 @@ import { setupArkd, applyArkdFees } from './lib/setup/arkd.mjs';
 import { setupDelegator } from './lib/setup/fulmine.mjs';
 import { setupLightning } from './lib/setup/lightning.mjs';
 import { setupSolver } from './lib/setup/solver.mjs';
+import { setupLnurl, clearLnurlCards } from './lib/setup/lnurl.mjs';
 import { createInvoice, payInvoice } from './lib/invoice.mjs';
 import { rotateSigner, setSigners, signerInfo, clearSignerState } from './lib/setup/signer.mjs';
 import { evmRpc, receiveRfqRequest, sendRfqRequest } from './lib/evm.mjs';
@@ -306,6 +308,9 @@ function banner(active) {
   if (active.has('intent-solver')) {
     lines.push(`  Intent solver   http://localhost:${env('INTENT_SOLVER_PORT', '8787')}  (swap solver; LN backend: lnd)`);
   }
+  if (active.has('lnurl')) {
+    lines.push(`  LNURL server    http://localhost:${env('LNURL_PORT', '9090')}  (LNURL-pay + user@${env('LNURL_BOOTSTRAP_DOMAIN', 'localhost')}; offline receive via intent-solver)`);
+  }
   if (active.has('evm-e2e')) {
     lines.push(`  Anvil           http://localhost:${env('EVM_RPC_PORT', '28545')}  (chain 31337)`);
     lines.push(`  EVM pricefeed   http://localhost:${env('EVM_PRICEFEED_PORT', '28088')}/btc-weth`);
@@ -362,6 +367,17 @@ async function start(opts) {
     log('intent-solver disabled (INTENT_SOLVER_IMAGE empty; set it to enable the profile)');
   }
 
+  // lnurl-server opt-out: clearing LNURL_IMAGE disables it independently.
+  if (!env('LNURL_IMAGE') && active.delete('lnurl')) {
+    log('lnurl-server disabled (LNURL_IMAGE empty; set it to enable the profile)');
+  }
+  // The offline trio is the point of the profile: without covclaimd or the
+  // solver the service would boot into a relay-only mode nothing asked for,
+  // so it follows its dependencies down rather than starting degraded.
+  if ((!active.has('covclaimd') || !active.has('intent-solver')) && active.delete('lnurl')) {
+    warn('lnurl-server needs covclaimd + intent-solver; skipping it (a dependency is disabled)');
+  }
+
   const profiles = [...active];
   log(`Starting arkade-regtest stack (profiles: ${profiles.join(', ')})...`);
   
@@ -373,7 +389,10 @@ async function start(opts) {
   // for the whole of arkd + boltz setup. startIntentSolver() brings it up on its
   // own, last, and waits on /healthz. Nothing else depends on it and it declares
   // no depends_on of its own, so holding its profile back costs nothing.
-  const waveProfiles = profiles.filter((p) => p !== 'intent-solver' && p !== 'evm-e2e');
+  // lnurl-server rides along: its cards file does not exist until setupLnurl()
+  // asks the running solver for its card, so the wave would bind-mount a
+  // directory over the file path instead.
+  const waveProfiles = profiles.filter((p) => p !== 'intent-solver' && p !== 'lnurl' && p !== 'evm-e2e');
 
   // Stagger startup when the closure is more than just base. Bringing up all
   // ~18 containers at once overwhelms Docker's embedded DNS (arkd <-> arkd-wallet
@@ -416,6 +435,7 @@ async function start(opts) {
   if (active.has('covclaimd')) await startCovclaimd();
   if (active.has('solver')) await setupSolver();
   if (active.has('intent-solver')) await startIntentSolver();
+  if (active.has('lnurl')) await setupLnurl();
   if (active.has('evm-e2e')) {
     await startEvmInfrastructure();
     await startEvmSolvers();
@@ -438,6 +458,8 @@ async function clean(opts) {
   composeDown({ volumes: true });
   // arkd-wallet's volume is gone, so the persisted signer set no longer applies.
   clearSignerState();
+  // The solver card the lnurl-server run read is gone with the solver that signed it.
+  clearLnurlCards();
   if (opts.prune) {
     log('Pruning dangling images and volumes...');
     docker(['image', 'prune', '-f']);
