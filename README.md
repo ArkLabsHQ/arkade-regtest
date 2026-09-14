@@ -255,7 +255,7 @@ Its Arkade wallet is derived from `INTENT_SOLVER_MNEMONIC`, fixed in `.env.defau
 The profile is **on by default**, pinned in `.env.defaults`:
 
 ```bash
-LNURL_IMAGE=ghcr.io/arklabshq/lnurl-server:0.3.2
+LNURL_IMAGE=ghcr.io/arklabshq/lnurl-server:0.3.3
 ```
 
 Clear the variable to turn the profile off. State lives in the `lnurl_datadir` volume (SQLite at `/data/lnurl.sqlite`), so sessions, addresses and accepted swaps survive `stop`/`start` and `clean` drops them with everything else.
