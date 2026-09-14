@@ -5,6 +5,8 @@ export const SOLVER_URL = process.env.SOLVER_URL ?? 'http://localhost:8787';
 export const ADMIN_URL = process.env.ADMIN_URL ?? 'http://localhost:8788';
 export const PRICEFEED_URL = process.env.PRICEFEED_URL ?? 'http://127.0.0.1:18088/price';
 export const PRICEFEED_PORT = Number(process.env.PRICEFEED_PORT ?? 18088);
+/** The relay the solver's `relay` ingress subscribes on, as the HOST reaches it. */
+export const NOSTR_RELAY_URL = process.env.NOSTR_RELAY_URL ?? 'ws://127.0.0.1:7777';
 
 /** 1 asset unit per sat at baseDecimals=8 / quoteDecimals=0 (matches intent-solver e2e). */
 export const FEED_PRICE = process.env.FEED_PRICE ?? '100000000';
