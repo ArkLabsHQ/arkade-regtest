@@ -25,8 +25,7 @@
  *
  * Needs an unreleased `@arkade-os/swap` — see `./link-sdk.sh`.
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   createSwapClient,
@@ -168,10 +167,10 @@ async function runSwap({ client, session, watcher, statusTransport, solverPubkey
   assertEq(swap.solver, solverPubkey, 'swap.solver');
   assertEq(swap.fee.asset, take, 'fee is denominated on the take leg');
   if (!swap.fundingTxid) fail('accept() returned no fundingTxid — nothing was funded');
+  // Positivity on both legs, never `take > give`: the legs carry different
+  // assets, so 10_017 sats for 9_638 asset units and its reverse are both
+  // correct quotes and a numeric comparison refuses one of the two.
   if (swap.take.amount <= 0n) fail(`non-positive take amount ${swap.take.amount}`);
-  // Positivity on BOTH legs, which is the check that replaces `take > give` on
-  // a cross-asset pair: 10_000 sats for 9_928 asset units and its reverse are
-  // both correct quotes, and comparing them would refuse one of the two.
   if (swap.fee.amount <= 0n || swap.fee.amount > ceiling) {
     fail(`fee ${swap.fee.amount} outside (0, ${ceiling}]`);
   }
