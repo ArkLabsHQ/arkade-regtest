@@ -87,6 +87,27 @@ async function assertRelayIngress(assetId) {
   return market;
 }
 
+/**
+ * The ceiling a well-informed application sets for this market, in the asset
+ * the fee is denominated in — the take leg, which is where a cross-asset
+ * spread is exact. A sats ceiling on a swap paying out asset units is refused
+ * rather than converted, because the client holds no rate.
+ *
+ * Two components, because `quote.fee` measures the whole concession against the
+ * card's price rather than the part the card can name: the published bps, and
+ * the flat fee this deployment charges on a BTC input, which the registry
+ * schema has no honest field for (see `lib/card.mjs`). A bps-only ceiling
+ * refuses every BTC->asset swap here — which is the ceiling working, so the
+ * ceiling names both rather than widening until it passes.
+ */
+const feeCeiling = (amount, direction, market) => {
+  const bps = (amount * BigInt(market.feeBps) + 9_999n) / 10_000n;
+  const flat = BigInt(
+    (direction === 'btc->asset' ? market.sellBaseFeeFlat : market.buyBaseFeeFlat) ?? 0,
+  );
+  return bps + flat;
+};
+
 /** What the wallet holds on both legs, for the before/after assertion. */
 async function snapshot(wallet, assetId) {
   const balance = await wallet.getBalance();
@@ -120,25 +141,20 @@ async function waitFilled(transport, rfqId, { timeoutMs = 240_000, intervalMs = 
   }
 }
 
-async function runSwap({ client, session, watcher, statusTransport, solverPubkey, legs, assetId, direction, amount, label }) {
+async function runSwap({ client, session, watcher, statusTransport, solverPubkey, legs, market, assetId, direction, amount, label }) {
   const give = direction === 'btc->asset' ? legs.btc : legs.asset;
   const take = direction === 'btc->asset' ? legs.asset : legs.btc;
   const before = await snapshot(session.wallet, assetId);
   console.log(`\n=== ${label} (${direction}, give ${amount}) ===`);
 
-  // The ceiling is denominated on the take leg, which is where a cross-asset
-  // swap's spread is exact — a sats ceiling on a swap paying out asset units is
-  // refused rather than converted, because the client holds no rate. 1% is a
-  // real ceiling here and not a formality: the market charges 50 bps plus, on
-  // the BTC leg, a 330-sat carrier, and at this feed's 1:1 the take leg is the
-  // same order as the give amount.
+  const ceiling = feeCeiling(amount, direction, market);
   const mark = watcher.mark();
   const swap = await client.exchange({
     give,
     take,
     amount,
     amountOn: 'give',
-    maxFee: { amount: amount / 100n, asset: take },
+    maxFee: { amount: ceiling, asset: take },
   });
 
   assertEq(swap.family, 'offer', 'swap.family');
@@ -153,6 +169,12 @@ async function runSwap({ client, session, watcher, statusTransport, solverPubkey
   assertEq(swap.fee.asset, take, 'fee is denominated on the take leg');
   if (!swap.fundingTxid) fail('accept() returned no fundingTxid — nothing was funded');
   if (swap.take.amount <= 0n) fail(`non-positive take amount ${swap.take.amount}`);
+  // Positivity on BOTH legs, which is the check that replaces `take > give` on
+  // a cross-asset pair: 10_000 sats for 9_928 asset units and its reverse are
+  // both correct quotes, and comparing them would refuse one of the two.
+  if (swap.fee.amount <= 0n || swap.fee.amount > ceiling) {
+    fail(`fee ${swap.fee.amount} outside (0, ${ceiling}]`);
+  }
   console.log('accepted', {
     id: swap.id,
     outcome: swap.outcome,
@@ -231,30 +253,41 @@ async function runSwap({ client, session, watcher, statusTransport, solverPubkey
 }
 
 /**
- * The payout landed in the trader's wallet.
+ * Both legs moved by exactly the quoted amounts.
  *
- * Asserted on the TAKE leg only. The give leg is not a clean subtraction: an
- * asset deposit also spends a dust carrier, a BTC deposit pays network cost,
- * and change re-lands asynchronously — so "sats went down by exactly the give
- * amount" is a flaky assertion about wallet mechanics, where "the asset the
- * solver owed arrived" is the one about the swap.
+ * Exact rather than a lower bound, and the dust carrier is why it can be. An
+ * asset VTXO cannot exist without one, so an asset deposit sends
+ * `ASSET_CARRIER_SATS` out beside the asset units and gets them back inside the
+ * fill's payout — which makes the sats delta `take - carrier` on asset->BTC and
+ * `carrier - give` on BTC->asset. Those are equalities, not slack, so the test
+ * states them: a fill that delivered the wrong amount, or a carrier that went
+ * missing, is the kind of thing a `>=` on the take leg alone would pass.
  */
 async function waitForPayout(wallet, assetId, before, direction, swap, timeoutMs = 180_000) {
   const deadline = Date.now() + timeoutMs;
   const wantsAsset = direction === 'btc->asset';
-  const expected = wantsAsset ? before.asset + swap.take.amount : before.sats + swap.take.amount;
+  const expected = wantsAsset
+    ? {
+        asset: before.asset + swap.take.amount,
+        sats: before.sats - swap.give.amount + ASSET_CARRIER_SATS,
+      }
+    : {
+        asset: before.asset - swap.give.amount,
+        sats: before.sats + swap.take.amount - ASSET_CARRIER_SATS,
+      };
   for (;;) {
     const now = await snapshot(wallet, assetId);
-    const got = wantsAsset ? now.asset : now.sats;
-    if (wantsAsset ? got >= expected : got >= before.sats + swap.take.amount - ASSET_CARRIER_SATS) {
+    if (now.sats === expected.sats && now.asset === expected.asset) {
       console.log(
-        `payout ${wantsAsset ? 'asset' : 'sats'} ${wantsAsset ? before.asset : before.sats} -> ${got}`,
+        `payout sats ${before.sats} -> ${now.sats}, asset ${before.asset} -> ${now.asset}` +
+          ` (carrier ${ASSET_CARRIER_SATS} ${wantsAsset ? 'returned with the fill' : 'rode the deposit out'})`,
       );
       return now;
     }
     if (Date.now() > deadline) {
       fail(
-        `payout never arrived: ${wantsAsset ? 'asset' : 'sats'} ${got}, expected >= ${expected}`,
+        `balances never reached the quoted amounts: sats ${now.sats} (want ${expected.sats}),` +
+          ` asset ${now.asset} (want ${expected.asset})`,
       );
     }
     mine(1);
@@ -328,6 +361,7 @@ async function main() {
         statusTransport,
         solverPubkey,
         legs,
+        market,
         assetId,
         direction: 'btc->asset',
         amount: jitter(10_000n, 997),
@@ -348,6 +382,7 @@ async function main() {
         statusTransport,
         solverPubkey,
         legs,
+        market,
         assetId,
         direction: 'asset->btc',
         amount: jitter(1_000n, 97),
