@@ -491,7 +491,7 @@ services:
   # up verified; live offline quotes additionally need the solver's relay
   # ingress (its `relay` mode), which this stack does not run — see README.
   lnurl-server:
-    image: ${LNURL_IMAGE:-ghcr.io/arklabshq/lnurl-server:0.3.0}
+    image: ${LNURL_IMAGE:-ghcr.io/arklabshq/lnurl-server:0.3.2}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}lnurl-server
     profiles: ['lnurl']
     restart: unless-stopped
