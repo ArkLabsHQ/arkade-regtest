@@ -323,6 +323,10 @@ services:
       SWAP_NETWORK: regtest
       ARK_SERVER_URL: http://arkd:7070
       EMULATOR_URL: http://emulator:7073
+      # Receive legs reveal funded lockups to the claim daemon (offline-claim
+      # path), so the solver is told where covclaimd lives rather than
+      # discovering it has none at claim time.
+      COVCLAIMD_URL: http://covclaimd:7071
       ARK_MNEMONIC: ${INTENT_SOLVER_MNEMONIC}
       # For the REGISTRY CARD, not for swap ingress — the distinction matters
       # and is easy to get backwards. `command: serve` starts the HTTP swap
@@ -342,8 +346,10 @@ services:
       # `command` to `relay` and set ADMIN_PORT/ADMIN_HOST for a healthcheck,
       # since relay mode publishes no HTTP port of its own.
       #
-      # `ws://`, not `wss://`: strfry here terminates no TLS.
-      RELAY_URL: ws://strfry:7777
+      # `ws://`, not `wss://`: strfry here terminates no TLS. Overridable for a
+      # deployment whose relay does (the lnurl-server cards file follows the
+      # same variable, so discovery keeps naming the relay both sides dial).
+      RELAY_URL: ${INTENT_SOLVER_RELAY_URL:-ws://strfry:7777}
       # Explicit, never inferred: leaving this unset does not mean "no
       # Lightning" — the app falls through to a hosted vendor backend, which
       # would quietly ignore the lnd below and refuse every regtest swap.
@@ -465,6 +471,48 @@ services:
       timeout: 5s
       retries: 12
 
+  # ── LNURL server (LNURL-pay + LN addresses) — profile `lnurl` ────────────
+  # ArkLabsHQ/lnurl-server: SSE relay sessions for online wallets, plus
+  # server-orchestrated offline receives through the intent-solver corridor
+  # (`lightning:BTC -> arkade:BTC`). The `lnurl` profile pulls in `ark`,
+  # `emulator`, `covclaimd`, `intent-solver` and `nostr`, and the orchestrator
+  # starts this last: offline receive is a hard boot requirement on the
+  # solver's signed registry card (SOLVER_CARDS_FILE, generated per start)
+  # and a live covclaimd, not a runtime fallback.
+  #
+  # No depends_on, on purpose: like intent-solver this is an overlay the
+  # orchestrator brings up explicitly once its setup has run, so holding its
+  # profile back from the app wave costs nothing and a partial `--profile`
+  # closure never trips over a dependency in a disabled profile.
+  #
+  # One known limit, stated not hidden: this stack's solver runs the HTTP
+  # `serve` mode, which answers no Nostr RFQs — and the server's production
+  # corridor client speaks Nostr only. Relay flow and offline discovery come
+  # up verified; live offline quotes additionally need the solver's relay
+  # ingress (its `relay` mode), which this stack does not run — see README.
+  lnurl-server:
+    image: ${LNURL_IMAGE:-ghcr.io/arklabshq/lnurl-server:0.3.2}
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}lnurl-server
+    profiles: ['lnurl']
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      - BASE_URL=http://localhost:${LNURL_PORT:-9090}
+      - BOOTSTRAP_DOMAIN=${LNURL_BOOTSTRAP_DOMAIN:-localhost}
+      - DB_PATH=/data/lnurl.sqlite
+      - ALLOW_INSECURE_TOKEN_STORAGE=1
+      - MIN_SENDABLE=${LNURL_MIN_SENDABLE:-1000}
+      - MAX_SENDABLE=${LNURL_MAX_SENDABLE:-100000000000}
+      - INVOICE_TIMEOUT_MS=${LNURL_INVOICE_TIMEOUT_MS:-30000}
+      - COVCLAIMD_URL=http://covclaimd:7071
+      - ARK_SERVER_URL=http://arkd:7070
+      - SOLVER_CARDS_FILE=/run/config/solver-cards.json
+    ports:
+      - '${LNURL_PORT:-9090}:3000'
+    volumes:
+      - lnurl_datadir:/data
+      - ${LNURL_CARDS_FILE:-./.lnurl-solver-cards.json}:/run/config/solver-cards.json:ro
+
 volumes:
   ark_wallet_datadir:
   ark_datadir:
@@ -473,3 +521,4 @@ volumes:
   solver_datadir:
   intent_solver_datadir:
   strfry_db:
+  lnurl_datadir:

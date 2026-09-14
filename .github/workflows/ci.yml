@@ -151,6 +151,20 @@ jobs:
           echo "$status" | jq -e '.state == "quoted"'
           echo "$status" | jq -e '.profile.lockup_address == "'"$lockup"'"'
 
+      - name: Exercise lnurl-server (relay + offline discovery)
+        run: |
+          set -euo pipefail
+          # /livez proves the port is bound; /readyz is 200 only once the
+          # regtest solver card yields a lightning-receive candidate — one
+          # assertion covering the generated cards file, the market IDs and
+          # the offline trio (COVCLAIMD_URL + ARK_SERVER_URL) at once.
+          curl -sf http://localhost:9090/livez | jq -e '.status == "live"'
+          curl -sf http://localhost:9090/readyz \
+            | jq -e '.status == "ready" and .components.solverDiscovery.ok == true'
+          # The cards file the assertion above just proved is runtime-generated
+          # and gitignored — assert the artifact, not just the outcome.
+          test -f docker/.lnurl-solver-cards.json
+
       - name: Exercise a settlement (deep flow — round + on-chain commitment)
         run: |
           set -euo pipefail
@@ -229,7 +243,7 @@ jobs:
         if: failure()
         run: |
           docker compose -f docker/compose.base.yml -f docker/compose.ark.yml ps || true
-          for c in bitcoin fulcrum mempool_api mempool_web nbxplorer arkd-wallet arkd arkade-wallet arkade-explorer lnd lnd-peer fulmine-delegator emulator solver intent-solver bucket-sync-initdb bucket-sync strfry; do
+          for c in bitcoin fulcrum mempool_api mempool_web nbxplorer arkd-wallet arkd arkade-wallet arkade-explorer lnd lnd-peer fulmine-delegator emulator solver intent-solver lnurl-server bucket-sync-initdb bucket-sync strfry; do
             echo "===== logs: $c ====="
             docker logs --tail 80 "$c" 2>&1 || true
           done
