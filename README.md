@@ -104,6 +104,8 @@ You can also pin profiles via the `REGTEST_PROFILES` env var (comma-separated, e
 
 Starting the `solver` profile also bootstraps it: once solverd is up, a one-shot container funds it with BTC and a freshly minted regtest asset, then registers a bidirectional `BTC/<asset>` market against the mock `pricefeed`. Amounts are tunable via `SOLVER_INIT_BTC`, `SOLVER_INIT_ASSET_SUPPLY`, and `SOLVER_INIT_ASSET_FUNDING`.
 
+Quoted BTC ↔ asset RFQ against **intent-solver** (HTTP and Nostr) is a separate harness: [smoke/asset-rfq/README.md](smoke/asset-rfq/README.md).
+
 `stop` and `clean` always act on the whole project regardless of profiles.
 
 ## Configuration
