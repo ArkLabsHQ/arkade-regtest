@@ -4,16 +4,7 @@ import { hex } from '@scure/base';
 import { SOLVER_ENV_PATH } from './paths.mjs';
 import { ASSET_CARRIER_SATS, FEE_BPS, NOSTR_RELAY_URL, PRICEFEED_URL } from './config.mjs';
 
-/**
- * The solver's x-only pubkey — what a client addresses an RFQ to, and what the
- * card must carry as `discovery_pubkey`.
- *
- * Derived from the same mnemonic the container boots with rather than scraped
- * out of its log, because that is the check worth having: `nostrCodecForWallet`
- * refuses to start when the key it derives is not the one the service reports,
- * so a key derived here that the relay ingress does not answer on means the
- * container is running a different seed than `data/solver.env` names.
- */
+/** x-only key from the container's mnemonic — same seed `nostrCodecForWallet` uses. */
 export function solverPubkeyFromEnv(path = SOLVER_ENV_PATH) {
   const env = readFileSync(path, 'utf8');
   const match = /^ARK_MNEMONIC=(.+)$/m.exec(env);
@@ -23,26 +14,11 @@ export function solverPubkeyFromEnv(path = SOLVER_ENV_PATH) {
 }
 
 /**
- * The registry card for this deployment, in the shape the discovery client
- * hands the v2 swap client.
+ * Card for `discovery.snapshot`. Built here because `solver card` / `GET /api/card`
+ * refuse relays that are not `wss://`, and strfry is `ws://`.
  *
- * Built here instead of read off `solver card` / `GET /api/card` for one
- * reason: both refuse a relay that is not `wss://`, and a local strfry is
- * `ws://`. Everything else is what the solver would have published — the
- * CAIP-19 leg ids, the feed pointer, `price_decimals` as
- * `baseDecimals - quoteDecimals`, and the console's own `fee_bps` and bounds.
- *
- * `price_feed` is the HOST url, not the container gateway one the solver reads:
- * the client runs on the host, and the card's feed is what IT fetches to price
- * the fee against. Both point at the same process.
- *
- * `sellBaseFeeFlat` is deliberately NOT published as `fee_flat`. The registry
- * schema denominates that field in quote-asset units and this deployment
- * charges it on the BTC input (the dust carrier the fill spends), so there is
- * no honest field for it — the solver's own card builder refuses the market for
- * exactly this. The consequence is visible and correct: the carrier lands in
- * `quote.fee`, which measures the whole concession against the card's price
- * rather than only the part the card can name.
+ * No `fee_flat`: the registry field is quote-denominated and this market charges
+ * the carrier on the BTC input. The solver's own builder refuses that too.
  */
 export function buildSolverCard({
   assetId,

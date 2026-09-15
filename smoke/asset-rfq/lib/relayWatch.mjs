@@ -1,31 +1,10 @@
 import WebSocket from 'ws';
 import { NOSTR_RELAY_URL } from './config.mjs';
 
-/**
- * The kind a directed RFQ negotiation rides: NIP-01's ephemeral range, so the
- * relay forwards it to live subscribers and stores nothing.
- *
- * Restated here rather than imported from `@arkade-os/swap`. This watcher is
- * the smoke's independent witness — if it read the constant off the code under
- * test, a client that moved to another kind would keep passing while talking to
- * nobody.
- */
+/** Kind 24859, restated so a client that moved kinds fails this watcher. */
 export const RFQ_DIRECTED_KIND = 24859;
 
-/**
- * A live subscription to the relay's directed-RFQ traffic.
- *
- * Ephemeral means the assertion has to be watching BEFORE the swap runs: there
- * is nothing to query afterwards, which is also what makes the evidence real —
- * every event counted here was forwarded by the relay while the negotiation was
- * happening.
- *
- * Content is NIP-44 ciphertext and stays unread. Direction is all this needs
- * and all it can have: an author and a `p` tag are public, so a request to the
- * solver's key and a reply from it are distinguishable without the conversation
- * key, and a watcher that could read the payload would be proving something
- * about its own keys rather than about the wire.
- */
+/** Subscribe before the swap: ephemeral events are not queryable after. */
 export async function watchRfqTraffic({ url = NOSTR_RELAY_URL, kind = RFQ_DIRECTED_KIND } = {}) {
   const socket = new WebSocket(url);
   await new Promise((resolve, reject) => {
@@ -80,10 +59,4 @@ export async function watchRfqTraffic({ url = NOSTR_RELAY_URL, kind = RFQ_DIRECT
   };
 }
 
-/**
- * Give the relay a moment to forward what is already in flight.
- *
- * `accept()` returns when the record is durable, which can be before the
- * solver's reply event has come back around to this second subscription.
- */
 export const settleRelay = (ms = 500) => new Promise((r) => setTimeout(r, ms));

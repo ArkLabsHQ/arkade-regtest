@@ -1,29 +1,10 @@
 #!/usr/bin/env node
 /**
- * BTC <-> Arkade-asset RFQ over Nostr, through the high-level swap client.
+ * BTC <-> asset RFQ over Nostr through `client.exchange()`.
  *
- * The HTTP smoke (`smoke-swaps.mjs`) proves the wire: it hand-builds an
- * `rfq_request`, posts it to the solver's swap port, and funds a covenant it
- * derived itself. This one proves the PRODUCT path instead — one
- * `client.exchange()` call per direction, against a solver reachable only over
- * a relay, with the transport the client picked from the card rather than one
- * the harness handed it.
- *
- * What makes it evidence rather than a second HTTP test:
- *
- * - The solver runs `relay` mode, so **port 8787 does not exist**. An HTTP
- *   fallback cannot silently carry this test; there is nothing to fall back to.
- * - `transportFor` is left unset, so the client resolves the rendezvous off the
- *   card and opens its own Nostr transport. The harness never names a relay to
- *   the client.
- * - A second, independent relay subscription counts the kind-24859 events while
- *   the swap runs (`lib/relayWatch.mjs`). It shares no code with the transport
- *   under test.
- * - `market.backend` is asserted `rfq` before anything is disclosed, which is
- *   the regression that matters: the feed-priced path would settle these same
- *   swaps and send not one packet.
- *
- * Needs an unreleased `@arkade-os/swap` — see `./link-sdk.sh`.
+ * Solver is `relay` mode (no :8787). `transportFor` unset — the client opens
+ * the card's rendezvous. A second relay subscription counts kind 24859.
+ * Needs the local swap build: `./link-sdk.sh`.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -55,15 +36,7 @@ const fail = (message) => {
 const assertEq = (actual, expected, label) =>
   actual === expected || fail(`${label}: expected ${expected}, got ${actual}`);
 
-/**
- * The relay ingress is reachable and serving this market over RFQ.
- *
- * Checked against the solver's own admin API and asserted rather than waited
- * for, because a Nostr test that skips when the relay is down proves nothing
- * and reports success. Both halves matter: `relay` connected is the transport,
- * and `servedBy: ["rfq"]` is this market answering negotiation rather than
- * sitting in the config unserved.
- */
+/** Fail if the solver is not quoting this asset over a live relay. */
 async function assertRelayIngress(assetId) {
   const backends = await fetch(`${ADMIN_URL}/api/backends`)
     .then((r) => r.json())
@@ -86,19 +59,7 @@ async function assertRelayIngress(assetId) {
   return market;
 }
 
-/**
- * The ceiling a well-informed application sets for this market, in the asset
- * the fee is denominated in — the take leg, which is where a cross-asset
- * spread is exact. A sats ceiling on a swap paying out asset units is refused
- * rather than converted, because the client holds no rate.
- *
- * Two components, because `quote.fee` measures the whole concession against the
- * card's price rather than the part the card can name: the published bps, and
- * the flat fee this deployment charges on a BTC input, which the registry
- * schema has no honest field for (see `lib/card.mjs`). A bps-only ceiling
- * refuses every BTC->asset swap here — which is the ceiling working, so the
- * ceiling names both rather than widening until it passes.
- */
+/** Take-leg ceiling: published bps plus this market's flat fee for the direction. */
 const feeCeiling = (amount, direction, market) => {
   const bps = (amount * BigInt(market.feeBps) + 9_999n) / 10_000n;
   const flat = BigInt(
@@ -113,15 +74,7 @@ async function snapshot(wallet, assetId) {
   return { sats: availableSats(balance), asset: assetBalance(balance, assetId) };
 }
 
-/**
- * The solver's own view of the negotiation, read over Nostr.
- *
- * A second transport rather than the client's: `rfq_status_request` is
- * addressed traffic like the quote was, so asking on a fresh key proves the
- * status half of the protocol independently — and it is the only way to read
- * the solver's `fill_txid` in relay mode, where the HTTP status route the other
- * smoke polls is not listening.
- */
+/** Poll `rfq_status` over Nostr until settled. Relays the fill_txid HTTP cannot. */
 async function waitFilled(transport, rfqId, { timeoutMs = 240_000, intervalMs = 3000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
@@ -251,17 +204,7 @@ async function runSwap({ client, session, watcher, statusTransport, solverPubkey
   return record;
 }
 
-/**
- * Both legs moved by exactly the quoted amounts.
- *
- * Exact rather than a lower bound, and the dust carrier is why it can be. An
- * asset VTXO cannot exist without one, so an asset deposit sends
- * `ASSET_CARRIER_SATS` out beside the asset units and gets them back inside the
- * fill's payout — which makes the sats delta `take - carrier` on asset->BTC and
- * `carrier - give` on BTC->asset. Those are equalities, not slack, so the test
- * states them: a fill that delivered the wrong amount, or a carrier that went
- * missing, is the kind of thing a `>=` on the take leg alone would pass.
- */
+/** Both legs equal the quote, carrier included. */
 async function waitForPayout(wallet, assetId, before, direction, swap, timeoutMs = 180_000) {
   const deadline = Date.now() + timeoutMs;
   const wantsAsset = direction === 'btc->asset';
@@ -346,9 +289,7 @@ async function main() {
     const opening = await snapshot(trader.wallet, assetId);
     console.log(`trader1 holds ${opening.sats} sats, ${opening.asset} ${state.ticker}`);
 
-    // Jitter both sizes: identical covenant terms derive one offer address, and
-    // the solver uniques its fills on the offer script — a fixed amount collides
-    // with a previous run's row and is refused before it is quoted.
+    // Jitter: the solver uniques fills on offer_pk_script, a fixed amount collides.
     const jitter = (base, spread) => base + BigInt(1 + Math.floor(Math.random() * spread));
 
     if (opening.sats < 20_000n) fail(`trader1 has ${opening.sats} sats, needs 20k for the BTC leg`);
