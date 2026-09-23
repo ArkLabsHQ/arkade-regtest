@@ -287,6 +287,7 @@ services:
       SOLVER_INIT_BTC: ${SOLVER_INIT_BTC:-1000000}
       SOLVER_INIT_ASSET_SUPPLY: ${SOLVER_INIT_ASSET_SUPPLY:-100000}
       SOLVER_INIT_ASSET_FUNDING: ${SOLVER_INIT_ASSET_FUNDING:-50000}
+      SOLVER_INIT_FEE_BPS: ${SOLVER_INIT_FEE_BPS:-50}
 
   # ── Intent solver (Lightning <-> Arkade swap solver) — `intent-solver` ─────
   # NOT the `solver` above. That one is solverd, the virtual-mempool intent

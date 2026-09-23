@@ -22,6 +22,9 @@ const cfg = {
   btcFunding: BigInt(env('SOLVER_INIT_BTC', '1000000')),
   assetSupply: BigInt(env('SOLVER_INIT_ASSET_SUPPLY', '100000')),
   assetFunding: BigInt(env('SOLVER_INIT_ASSET_FUNDING', '50000')),
+  // Solver margin registered on the market, in basis points (0-5000 per
+  // solverd's validation). 0 = no fee.
+  feeBps: Number(env('SOLVER_INIT_FEE_BPS', '50')),
 };
 
 function env(key, fallback) {
@@ -165,6 +168,7 @@ async function addMarket(baseAsset, quoteAsset, priceFeed, pricePath) {
       max_base_amount: 100_000_000,
       price_feed: priceFeed,
       price_path: pricePath,
+      fee_bps: cfg.feeBps,
     },
   });
   log(`added market ${baseAsset}/${quoteAsset}`);
