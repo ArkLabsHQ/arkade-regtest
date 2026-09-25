@@ -471,7 +471,7 @@ async function clean(opts) {
 async function main() {
   const argv = process.argv.slice(2);
   const opts = parseArgs(argv);
-  loadEnv(ROOT, opts.env);
+  loadEnv(ROOT, opts.env, { quiet: ['ark', 'arkd', 'rpc'].includes(argv[0]) });
   const passthrough = argv.slice(1).filter((arg, index, args) => arg !== '--env' && args[index - 1] !== '--env');
 
   // `ark` / `arkd` are raw passthroughs into the arkd container, so forward
