@@ -169,14 +169,6 @@ services:
     ports:
       - "${FULCRUM_TCP_PORT:-50001}:50001"
       - "${FULCRUM_WS_PORT:-50003}:50003"
-    # Fulcrum opens its TCP listener only once it has synced to bitcoind. mempool_api
-    # does not retry a refused connection reliably, so it must wait for this.
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/50001'"]
-      interval: 3s
-      timeout: 3s
-      retries: 60
-      start_period: 5s
 
   # ── mempool: MariaDB + backend API + web frontend ──────────────────────────
   mempool_mariadb:
@@ -201,12 +193,12 @@ services:
     init: true
     restart: on-failure
     stop_grace_period: 1m
-    command: "./wait-for-it.sh mempool_mariadb:3306 --timeout=720 --strict -- ./start.sh"
+    # Fulcrum listens only once bitcoind has blocks, which the orchestrator mines
+    # after `compose up`, so this waits in-container instead of via depends_on health.
+    command: "./wait-for-it.sh mempool_mariadb:3306 --timeout=720 --strict -- ./wait-for-it.sh fulcrum:50001 --timeout=720 --strict -- ./start.sh"
     depends_on:
-      mempool_mariadb:
-        condition: service_started
-      fulcrum:
-        condition: service_healthy
+      - mempool_mariadb
+      - fulcrum
     environment:
       # Bitcoin Core RPC
       CORE_RPC_HOST: bitcoin
