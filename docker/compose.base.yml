@@ -193,7 +193,9 @@ services:
     init: true
     restart: on-failure
     stop_grace_period: 1m
-    command: "./wait-for-it.sh mempool_mariadb:3306 --timeout=720 --strict -- ./start.sh"
+    # Fulcrum listens only once bitcoind has blocks, which the orchestrator mines
+    # after `compose up`, so this waits in-container instead of via depends_on health.
+    command: "./wait-for-it.sh mempool_mariadb:3306 --timeout=720 --strict -- ./wait-for-it.sh fulcrum:50001 --timeout=720 --strict -- ./start.sh"
     depends_on:
       - mempool_mariadb
       - fulcrum
