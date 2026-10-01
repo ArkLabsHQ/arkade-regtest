@@ -23,6 +23,9 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Test CLI helpers
+        run: node --test
+
       - name: Start regtest environment
         run: node regtest.mjs start
 
