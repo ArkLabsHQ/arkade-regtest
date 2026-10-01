@@ -17,4 +17,6 @@ test('rpc stdout contains only the bitcoin-cli response when an override is load
   );
   assert.equal(result.error, undefined);
   assert.equal(result.stdout, '');
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, new RegExp(`no-such-test-${process.pid}-bitcoin`));
 });
