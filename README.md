@@ -82,12 +82,13 @@ Services are grouped into compose profiles so you can bring up just the tier you
 | `solver`        | solver, pricefeed                                                 | `ark`, `emulator`          |
 | `intent-solver` | intent-solver                                                     | `ark`, `emulator`, `lightning`, `nostr` |
 | `lnurl`         | lnurl-server                                                      | `ark`, `emulator`, `covclaimd`, `intent-solver`, `nostr` |
+| `taxi`          | taxi (opt-in)                                                     | `ark`, `emulator`          |
 | `evm-e2e`       | anvil, evm-pricefeed, evm-init, intent-solver-evm-send, intent-solver-evm-receive | `ark`, `emulator`          |
 | `sync`          | bucket-sync, bucket-sync-initdb                                   | `base`                     |
 | `nostr`         | strfry                                                            | `base`                     |
 
 ```bash
-node regtest.mjs start                      # full stack (all profiles)
+node regtest.mjs start                      # standard profiles (Taxi and evm-e2e are opt-in)
 node regtest.mjs start --profile base       # just the chain + explorer/indexer
 node regtest.mjs start --profile ark        # base + ark (incl. web wallet + explorer)
 node regtest.mjs start --profile lightning  # base + ark + lnd-peer, channel opened and balanced
@@ -454,3 +455,18 @@ No build cache step is needed — the stack is pulled Docker images only.
 - The `NIGIRI_*` variables and the `_build/` cache are gone.
 - The explorer/indexer is now Fulcrum + mempool instead of electrs + chopsticks + esplora. The Esplora REST API moved from `http://localhost:3000` (chopsticks root) to `http://localhost:3000/api` (mempool).
 - There is no auto-miner — mine explicitly (see the note above).
+
+### Taxi payments
+
+Taxi is opt-in and uses the same arkd, emulator and persistent Compose lifecycle as the other services. Build the current Taxi checkout, then start with the time-based expiry and fee-free `.env.taxi` fixture:
+
+```bash
+docker build -t arkade-taxi:regtest /path/to/arkade-taxi
+node regtest.mjs start --env .env.taxi
+```
+
+Set `TAXI_IMAGE` in your shell or override file to use another locally built or published image. The image must support `TAXI_ESPLORA_URL` (Taxi `ffdeff7` or later). A fresh stack sends one `TAXI_FLOAT_SATS` payment to Taxi's runtime funding address and enables free bitcoin and asset fares. Taxi's own inventory maintenance splits that coin for parallel use; quote availability may lag funding while that transaction is indexed. The default positive reserve is one sat; override `TAXI_OPERATOR_MIN_RESERVE_SATS` for reserve scenarios.
+
+The public API is `http://localhost:8080`, and the admin console/API is `http://localhost:8081`; both bind only to loopback. Override `TAXI_HTTP_PORT` and `TAXI_ADMIN_PORT` alongside the existing host port settings to isolate simultaneous stacks. The configured operator key is public and only for regtest.
+
+`stop` and subsequent `start` preserve Taxi's database, operator policy and funding. Startup bootstraps policy only when no policy edits exist, and leaves an intentionally paused service paused. `clean` removes the selected project's Taxi volume along with its other volumes. Clients/tests fund their own wallets with `node regtest.mjs ark send --to <address> --amount <sats> --password secret` and use the real public Taxi API for payment/claim scenarios; no separate stack runner is required. Taxi uses internal Docker provider URLs and advertises their host-facing ports to browser and host clients.

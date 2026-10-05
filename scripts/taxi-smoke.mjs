@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { loadEnv, env } from '../lib/env.mjs';
+import { ROOT } from '../lib/compose.mjs';
+import { fetchJson } from '../lib/wait.mjs';
+
+const envFile = process.argv[2] || '.env.taxi';
+loadEnv(ROOT, envFile);
+const admin = 'http://localhost:' + env('TAXI_ADMIN_PORT', '8081') + '/admin/api';
+const read = async (path) => {
+  const response = await fetchJson(admin + '/' + path, { headers: { Connection: 'close' } });
+  assert.ok(response.ok, path + ' HTTP ' + response.status);
+  return response.json;
+};
+const funding = await read('funding');
+const policy = await read('policy');
+assert.equal(policy.paused, false);
+assert.equal(funding.usableSats, env('TAXI_FLOAT_SATS', '500000'));
+assert.equal(funding.reservedSats, '0');
+const retained = { ...policy, paused: true, quoteTtlSeconds: policy.quoteTtlSeconds + 1 };
+const update = await fetchJson(admin + '/policy', { method: 'PATCH', headers: { 'Content-Type': 'application/json', Connection: 'close' }, body: JSON.stringify({ paused: retained.paused, quoteTtlSeconds: retained.quoteTtlSeconds }) });
+assert.ok(update.ok, JSON.stringify(update.json));
+execFileSync(process.execPath, ['regtest.mjs', 'stop', '--env', envFile], { cwd: ROOT, stdio: 'inherit' });
+execFileSync(process.execPath, ['regtest.mjs', 'start', '--env', envFile], { cwd: ROOT, stdio: 'inherit' });
+assert.deepEqual(await read('policy'), retained);
+const restarted = await read('funding');
+assert.equal(restarted.arkAddress, funding.arkAddress);
+assert.equal(restarted.usableSats, funding.usableSats);
+assert.equal(restarted.reservedSats, '0');
+console.log('Taxi funding and edited paused policy survive stop/start');
