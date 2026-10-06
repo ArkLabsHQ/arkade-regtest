@@ -352,7 +352,6 @@ async function start(opts) {
 
   // Emulator opt-out: clearing EMULATOR_IMAGE disables it — and the solver +
   // covclaimd, which both require the emulator.
-  if (active.has('taxi') && !env('TAXI_IMAGE')) fail('taxi requires TAXI_IMAGE; build arkade-taxi:regtest or set a published image');
   if (active.has('taxi') && !env('EMULATOR_IMAGE')) fail('taxi requires EMULATOR_IMAGE');
 
   if (!env('EMULATOR_IMAGE')) {
