@@ -524,6 +524,7 @@ services:
       TAXI_HTTP_PORT: '8080'
       TAXI_ADMIN_PORT: '8081'
       TAXI_ADMIN_OPERATOR: arkade-regtest
+      TAXI_RECONCILE_INTERVAL_MS: ${TAXI_RECONCILE_INTERVAL_MS:-10000}
       TAXI_ARKD_URL: http://arkd:7070
       TAXI_EMULATOR_URL: http://emulator:7073
       TAXI_ESPLORA_URL: http://mempool_web/api
