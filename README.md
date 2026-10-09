@@ -81,6 +81,7 @@ Services are grouped into compose profiles so you can bring up just the tier you
 | `emulator`      | emulator                                                          | `ark`                      |
 | `solver`        | solver, pricefeed                                                 | `ark`, `emulator`          |
 | `intent-solver` | intent-solver                                                     | `ark`, `emulator`, `lightning`, `nostr` |
+| `delegatee`     | delegatee                                                         | `ark`, `emulator`          |
 | `lnurl`         | lnurl-server                                                      | `ark`, `emulator`, `covclaimd`, `intent-solver`, `nostr` |
 | `evm-e2e`       | anvil, evm-pricefeed, evm-init, intent-solver-evm-send, intent-solver-evm-receive | `ark`, `emulator`          |
 | `sync`          | bucket-sync, bucket-sync-initdb                                   | `base`                     |
