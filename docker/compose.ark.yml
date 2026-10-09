@@ -243,6 +243,24 @@ services:
       COVCLAIMD_REVEAL_ENABLED: 'true'
       COVCLAIMD_LOG_LEVEL: ${COVCLAIMD_LOG_LEVEL:-4}
 
+  # ── delegatee (renewal + boarding daemon) — profile `delegatee` ────────────
+  # Keeps its state in postgres's default database (arkd runs on sqlite here).
+  # Published on 7280: arkade-explorer holds 7080.
+  delegatee:
+    image: ${DELEGATEE_IMAGE:-ghcr.io/arkade-os/delegatee:v0.0.2}
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}delegatee
+    profiles: ['delegatee']
+    restart: unless-stopped
+    ports:
+      - '7280:7080'
+    environment:
+      DELEGATEE_ARK_URL: arkd:7070
+      DELEGATEE_EMULATOR_URL: emulator:7073
+      DELEGATEE_EXPLORER_URL: http://mempool_web/api
+      DELEGATEE_DATABASE_URL: postgres://postgres@postgres:5432/postgres?sslmode=disable
+      DELEGATEE_DELEGATE_KEY: 5c2b7d0e8f1a3c4b6d9e0f2a1b3c5d7e9f0a2b4c6d8e0f1a3b5c7d9e1f0a2b4c
+      DELEGATEE_ADMIN_AUTH: disabled
+
   # ── Solver (arkade virtual-mempool intent solver) — profile `solver` ───────
   # Depends on arkd (SOLVER_ARK_URL) and the emulator (SOLVER_EMULATOR_URL), so
   # the orchestrator's `solver` profile also pulls in `ark` and `emulator`.
