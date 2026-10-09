@@ -1,0 +1,9 @@
+node_modules/
+data/keys.json
+data/state.json
+data/solver.env
+data/swaps/
+*.sqlite
+*.sqlite-*
+data/
+node_modules/
