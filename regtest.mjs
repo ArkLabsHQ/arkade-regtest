@@ -15,6 +15,7 @@
 //   ark → base,  delegate → ark,  lightning → ark,  emulator → ark,
 //   solver → ark + emulator,  intent-solver → ark + emulator + lightning + nostr,
 //   lnurl → ark + emulator + covclaimd + intent-solver + nostr,
+//   delegatee → ark + emulator,
 //   sync → base,  nostr → base. `--profile lightning` brings up base+ark+lnd-peer;
 //   `--profile sync` / `--profile nostr` skip the Ark stack entirely.
 //   Selection precedence: --profile flags > REGTEST_PROFILES env (comma-list)
@@ -302,6 +303,7 @@ function banner(active) {
   if (active.has('taxi')) {
     lines.push(`  Taxi            http://localhost:${env('TAXI_HTTP_PORT', '8080')}  (admin :${env('TAXI_ADMIN_PORT', '8081')})`);
   }
+  if (active.has('delegatee')) lines.push('  delegatee       http://localhost:7280');
   if (active.has('covclaimd')) {
     lines.push(`  covclaimd       http://localhost:${env('COVCLAIMD_HTTP_PORT', '7271')}`);
   }
@@ -440,6 +442,10 @@ async function start(opts) {
   if (active.has('emulator')) await startEmulator();
   if (active.has('taxi')) await setupTaxi();
   if (active.has('covclaimd')) await startCovclaimd();
+  // started in the wave above, it restarts until arkd and the emulator answer
+  if (active.has('delegatee')) {
+    await waitForOrFail('delegatee /v1/info', () => httpOk('http://localhost:7280/v1/info'), { attempts: 60 });
+  }
   if (active.has('solver')) await setupSolver();
   if (active.has('intent-solver')) await startIntentSolver();
   if (active.has('lnurl')) await setupLnurl();
