@@ -254,3 +254,31 @@ jobs:
       - name: Cleanup
         if: always()
         run: node regtest.mjs clean
+
+  taxi-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/checkout@v4
+        with:
+          repository: ArkLabsHQ/arkade-taxi
+          ref: ffdeff7c1b171e660e1c119cd6994c440a456338
+          path: taxi-source
+      - name: Build Taxi
+        run: docker build -t arkade-taxi:regtest taxi-source
+      - name: Start Taxi profile
+        run: node regtest.mjs start --env .env.taxi
+      - name: Verify funded inventory and retained operator policy
+        run: node scripts/taxi-smoke.mjs .env.taxi
+      - name: Dump Taxi diagnostics
+        if: failure()
+        run: |
+          docker logs --tail 100 taxi || true
+          docker logs --tail 100 arkd || true
+      - name: Cleanup
+        if: always()
+        run: node regtest.mjs clean --env .env.taxi
