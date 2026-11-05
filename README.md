@@ -145,12 +145,12 @@ The default stack uses no prefix (empty string) and the default `arkade-regtest`
 
 ### Custom arkd version
 
-arkd is always run from `ARKD_IMAGE` / `ARKD_WALLET_IMAGE` / `ARKD_SIGNER_IMAGE` (there is no built-in fallback). The defaults are `v0.9.25-rc.2`. That line moved the signer into its own `arkd-signer` service and made Postgres + Redis mandatory (SQLite, Badger and the in-memory live store are gone), so the compose file no longer runs arkd `v0.9.16` or older — pin an older release of this repo for those. Pin a different `v0.9.25`+ version in your override file:
+arkd is always run from `ARKD_IMAGE` / `ARKD_WALLET_IMAGE` / `ARKD_SIGNER_IMAGE` (there is no built-in fallback). The defaults are `v0.9.25`. That line moved the signer into its own `arkd-signer` service and made Postgres + Redis mandatory (SQLite, Badger and the in-memory live store are gone), so the compose file no longer runs arkd `v0.9.16` or older — pin an older release of this repo for those. Pin a different `v0.9.25`+ version in your override file:
 
 ```bash
-ARKD_IMAGE=ghcr.io/arkade-os/arkd:v0.9.25-rc.2
-ARKD_WALLET_IMAGE=ghcr.io/arkade-os/arkd-wallet:v0.9.25-rc.2
-ARKD_SIGNER_IMAGE=ghcr.io/arkade-os/arkd-signer:v0.9.25-rc.2
+ARKD_IMAGE=ghcr.io/arkade-os/arkd:v0.9.25
+ARKD_WALLET_IMAGE=ghcr.io/arkade-os/arkd-wallet:v0.9.25
+ARKD_SIGNER_IMAGE=ghcr.io/arkade-os/arkd-signer:v0.9.25
 ```
 
 ### Operator signer rotation

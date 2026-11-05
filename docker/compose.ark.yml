@@ -18,7 +18,7 @@ name: arkade-regtest
 services:
   # ── arkd wallet (on-chain wallet, backed by nbxplorer) ─────────────────────
   arkd-wallet:
-    image: ${ARKD_WALLET_IMAGE:-ghcr.io/arkade-os/arkd-wallet:v0.9.25-rc.2}
+    image: ${ARKD_WALLET_IMAGE:-ghcr.io/arkade-os/arkd-wallet:v0.9.25}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}arkd-wallet
     profiles: ['ark']
     restart: unless-stopped
@@ -45,7 +45,7 @@ services:
   # key is a KNOWN regtest one so signer rotation can advertise it as deprecated
   # (arkd needs the deprecated PRIVATE key to co-sign migration of old funds).
   arkd-signer:
-    image: ${ARKD_SIGNER_IMAGE:-ghcr.io/arkade-os/arkd-signer:v0.9.25-rc.2}
+    image: ${ARKD_SIGNER_IMAGE:-ghcr.io/arkade-os/arkd-signer:v0.9.25}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}arkd-signer
     profiles: ['ark']
     restart: unless-stopped
@@ -72,7 +72,7 @@ services:
 
   # ── arkd (Ark server) ──────────────────────────────────────────────────────
   arkd:
-    image: ${ARKD_IMAGE:-ghcr.io/arkade-os/arkd:v0.9.25-rc.2}
+    image: ${ARKD_IMAGE:-ghcr.io/arkade-os/arkd:v0.9.25}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}arkd
     profiles: ['ark']
     restart: unless-stopped
