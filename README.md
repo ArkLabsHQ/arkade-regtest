@@ -58,7 +58,7 @@ Two compose files are merged into one project (`arkade-regtest`):
 - **`docker/compose.base.yml`** — chain + indexers + explorer + counterparty LN:
   `bitcoin` (Bitcoin Core regtest), `postgres`, `nbxplorer`, `fulcrum` (Electrum server),
   `mempool_api` + `mempool_web` + `mempool_mariadb` (block explorer & Esplora REST API), and `lnd`.
-- **`docker/compose.ark.yml`** — the Ark stack: `arkd` + `arkd-wallet`, `lnd-peer`,
+- **`docker/compose.ark.yml`** — the Ark stack: `arkd` + `arkd-wallet` + `arkd-signer` + `redis`, `lnd-peer`,
   `fulmine-delegator`, `arkade-wallet`, `arkade-explorer`, and the profile-gated `emulator` and
   `intent-solver` — plus `bucket-sync` (and its one-shot `bucket-sync-initdb`) and `strfry`, which
   ride on the same base but have no Ark dependency of their own.
@@ -75,7 +75,7 @@ Services are grouped into compose profiles so you can bring up just the tier you
 | Profile         | Services                                                          | Depends on                 |
 | --------------- | ----------------------------------------------------------------- | -------------------------- |
 | `base`          | bitcoin, postgres, nbxplorer, fulcrum, mempool (api/web/db), lnd  | —                          |
-| `ark`           | arkd, arkd-wallet, arkade-wallet, arkade-explorer                 | `base`                     |
+| `ark`           | arkd, arkd-wallet, arkd-signer, redis, arkade-wallet, arkade-explorer | `base`                     |
 | `delegate`      | fulmine-delegator                                                 | `ark`                      |
 | `lightning`     | lnd-peer (+ its channel to the base `lnd`)                        | `ark`                      |
 | `emulator`      | emulator                                                          | `ark`                      |
@@ -145,11 +145,12 @@ The default stack uses no prefix (empty string) and the default `arkade-regtest`
 
 ### Custom arkd version
 
-arkd is always run from `ARKD_IMAGE` / `ARKD_WALLET_IMAGE` (there is no built-in fallback). The defaults are `v0.9.14` — the [signer rotation](#operator-signer-rotation) feature needs deprecated-signer support, which landed in arkd `v0.9.10`+ (after `v0.9.6`). Pin a different version in your override file:
+arkd is always run from `ARKD_IMAGE` / `ARKD_WALLET_IMAGE` / `ARKD_SIGNER_IMAGE` (there is no built-in fallback). The defaults are `v0.9.25-rc.2`. That line moved the signer into its own `arkd-signer` service and made Postgres + Redis mandatory (SQLite, Badger and the in-memory live store are gone), so the compose file no longer runs arkd `v0.9.16` or older — pin an older release of this repo for those. Pin a different `v0.9.25`+ version in your override file:
 
 ```bash
-ARKD_IMAGE=ghcr.io/arkade-os/arkd:v0.9.14
-ARKD_WALLET_IMAGE=ghcr.io/arkade-os/arkd-wallet:v0.9.14
+ARKD_IMAGE=ghcr.io/arkade-os/arkd:v0.9.25-rc.2
+ARKD_WALLET_IMAGE=ghcr.io/arkade-os/arkd-wallet:v0.9.25-rc.2
+ARKD_SIGNER_IMAGE=ghcr.io/arkade-os/arkd-signer:v0.9.25-rc.2
 ```
 
 ### Operator signer rotation
@@ -169,7 +170,7 @@ node regtest.mjs signer-info                   # print the active + deprecated s
 
 `set-signers` applies a **precise** set rather than generating keys: `--active <priv>` plus a comma-separated `--deprecated <priv>[:<cutoff>],…` (each cutoff a Unix-seconds timestamp or `+N`/`-N` offset). It's the primitive the ts-sdk e2e drives rotation through; `rotate-signer` is the convenience wrapper that generates + tracks keys for you.
 
-How it works: arkd reads its signer set from arkd-wallet's `ARKD_WALLET_SIGNER_KEY` (active) and `ARKD_WALLET_DEPRECATED_SIGNER_KEYS` (`<hexpriv>[:<cutoff>],…`) env, so a rotation recreates arkd-wallet with the new env (reusing its on-chain volume), unlocks it, and restarts arkd so it re-fetches the rotated set. The wallet boots from a **known default signer key** (`ARKD_WALLET_SIGNER_KEY` in `.env.defaults`) rather than self-generating one, and the CLI seeds `.signer-state.json` with it — so even the **first** rotation can advertise the boot signer as deprecated (arkd needs the deprecated **private** key to co-sign migration of pre-rotation funds). `clean` resets the signer set along with the wallet volume. Requires the rc images (see [Custom arkd version](#custom-arkd-version)).
+How it works: arkd reads its signer set from arkd-signer's `ARKD_SIGNER_SECRET_KEY` (active) and `ARKD_SIGNER_DEPRECATED_KEYS` (`<hexpriv>[:<cutoff>],…`) env, so a rotation recreates arkd-signer with the new env, waits for it to be healthy, and restarts arkd so it re-fetches the rotated set. The signer boots from a **known default key** (`ARKD_SIGNER_SECRET_KEY` in `.env.defaults`), and the CLI seeds `.signer-state.json` with it — so even the **first** rotation can advertise the boot signer as deprecated (arkd needs the deprecated **private** key to co-sign migration of pre-rotation funds). `clean` resets the signer set. Requires arkd `v0.9.25`+ (see [Custom arkd version](#custom-arkd-version)).
 
 ### Fast VTXO expiry & sweeps (block-denominated locktimes)
 

@@ -462,7 +462,7 @@ async function stop() {
 async function clean(opts) {
   log(`Removing ${env('REGTEST_PROJECT', 'arkade-regtest')} containers and volumes...`);
   composeDown({ volumes: true });
-  // arkd-wallet's volume is gone, so the persisted signer set no longer applies.
+  // The signer is recreated from defaults on next start, so the persisted set no longer applies.
   clearSignerState();
   // The solver card the lnurl-server run read is gone with the solver that signed it.
   clearLnurlCards();
