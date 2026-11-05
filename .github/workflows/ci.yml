@@ -212,11 +212,10 @@ jobs:
       - name: Exercise signer rotation (operator key rotation + deprecation)
         run: |
           set -euo pipefail
-          # Rotate twice. The first rotation moves off arkd-wallet's self-generated
-          # key to a CLI-managed one (which can't be deprecated — its private key was
-          # never ours); the second deprecates THAT key with a future cutoff. Asserts
+          # Rotate twice. The first rotation deprecates the signer's known
+          # default key; the second deprecates the CLI-managed one with a future cutoff. Asserts
           # the active signer changes each time and a deprecated signer is advertised,
-          # proving the rc images honor ARKD_WALLET_DEPRECATED_SIGNER_KEYS.
+          # proving the images honor ARKD_SIGNER_DEPRECATED_KEYS.
           before=$(curl -sf http://localhost:7070/v1/info | jq -r '.signerPubkey')
           node regtest.mjs rotate-signer
           mid=$(curl -sf http://localhost:7070/v1/info | jq -r '.signerPubkey')
@@ -246,7 +245,7 @@ jobs:
         if: failure()
         run: |
           docker compose -f docker/compose.base.yml -f docker/compose.ark.yml ps || true
-          for c in bitcoin fulcrum mempool_api mempool_web nbxplorer arkd-wallet arkd arkade-wallet arkade-explorer lnd lnd-peer fulmine-delegator emulator solver intent-solver lnurl-server bucket-sync-initdb bucket-sync strfry; do
+          for c in bitcoin fulcrum mempool_api mempool_web nbxplorer arkd-wallet arkd-signer redis arkd arkade-wallet arkade-explorer lnd lnd-peer fulmine-delegator emulator solver intent-solver lnurl-server bucket-sync-initdb bucket-sync strfry; do
             echo "===== logs: $c ====="
             docker logs --tail 80 "$c" 2>&1 || true
           done
