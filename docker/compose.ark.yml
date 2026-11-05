@@ -18,7 +18,7 @@ name: arkade-regtest
 services:
   # ── arkd wallet (on-chain wallet, backed by nbxplorer) ─────────────────────
   arkd-wallet:
-    image: ${ARKD_WALLET_IMAGE:-ghcr.io/arkade-os/arkd-wallet:v0.9.15}
+    image: ${ARKD_WALLET_IMAGE:-ghcr.io/arkade-os/arkd-wallet:v0.9.25-rc.2}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}arkd-wallet
     profiles: ['ark']
     restart: unless-stopped
@@ -63,6 +63,7 @@ services:
     container_name: ${REGTEST_CONTAINER_PREFIX:-}redis
     profiles: ['ark']
     restart: unless-stopped
+    # Intentionally ephemeral: no volume / appendonly. arkd's live store is rebuilt on boot.
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 2s
@@ -71,7 +72,7 @@ services:
 
   # ── arkd (Ark server) ──────────────────────────────────────────────────────
   arkd:
-    image: ${ARKD_IMAGE:-ghcr.io/arkade-os/arkd:v0.9.15}
+    image: ${ARKD_IMAGE:-ghcr.io/arkade-os/arkd:v0.9.25-rc.2}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}arkd
     profiles: ['ark']
     restart: unless-stopped
@@ -79,7 +80,7 @@ services:
       arkd-wallet:
         condition: service_started
       arkd-signer:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_healthy
       postgres:
