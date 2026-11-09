@@ -381,60 +381,42 @@ services:
     command: ['serve']
     user: root
     environment:
-      SWAP_NETWORK: regtest
-      ARK_SERVER_URL: http://arkd:7070
-      EMULATOR_URL: http://emulator:7073
-      # Receive legs reveal funded lockups to the claim daemon (offline-claim
-      # path), so the solver is told where covclaimd lives rather than
-      # discovering it has none at claim time.
-      COVCLAIMD_URL: http://covclaimd:7071
-      ARK_MNEMONIC: ${INTENT_SOLVER_MNEMONIC}
-      # For the REGISTRY CARD, not for swap ingress — the distinction matters
-      # and is easy to get backwards. `command: serve` starts the HTTP swap
-      # API and the money-mover; it does NOT subscribe to a relay. Only
-      # `command: relay` opens the RFQ ingress, and the two are alternatives:
-      # relay mode has no listening swap port.
-      #
-      # Verified rather than assumed: with this set and `serve` running, a
-      # trader publishing a signed RFQ to strfry gets `no reply within
-      # 30000ms`, while the same request over `POST /v1/swap` completes a
-      # swap. Both transports carry identical payloads — the difference is
-      # only which one this process is listening on.
-      #
-      # So what this buys is the card: the solver's published listing names a
-      # relay a client can reach it on, and the admin console can post an ad
-      # there. Swap over HTTP; to exercise the Nostr ingress instead, override
-      # `command` to `relay` and set ADMIN_PORT/ADMIN_HOST for a healthcheck,
-      # since relay mode publishes no HTTP port of its own.
-      #
-      # `ws://`, not `wss://`: strfry here terminates no TLS. Overridable for a
-      # deployment whose relay does (the lnurl-server cards file follows the
-      # same variable, so discovery keeps naming the relay both sides dial).
-      RELAY_URL: ${INTENT_SOLVER_RELAY_URL:-ws://strfry:7777}
-      # Explicit, never inferred: leaving this unset does not mean "no
-      # Lightning" — the app falls through to a hosted vendor backend, which
-      # would quietly ignore the lnd below and refuse every regtest swap.
-      LN_BACKEND: lnd
-      LND_SOCKET: lnd:10009
-      LND_CERT_PATH: /lnd/tls.cert
-      LND_MACAROON_PATH: /lnd/data/chain/bitcoin/regtest/admin.macaroon
-      # TWO explorers, because the two chains are watched by different clients
-      # and each defaults badly inside a container. mempool serves an Esplora
-      # API under /api, so one host answers both.
-      #
-      # The LIGHTNING side: LND's own chain view is wallet-scoped and carries
-      # no per-output values, so the onchain corridors need an explorer to see
-      # a client's funding transaction at all.
-      LND_ESPLORA_URL: http://mempool_web/api
-      # The ARKADE side, which is a different client with its own default: the
-      # SDK falls back to http://localhost:3000/api on regtest, and inside this
-      # container that resolves to the container itself. Left unset the solver
-      # logs "Failed to fetch chain tip; height-based expiry will not be
-      # evaluated" ONCE at startup and carries on — so the stack reads healthy
-      # while block-denominated VTXO expiry silently goes unwatched.
-      ARK_ESPLORA_URL: http://mempool_web/api
-      HOST: 0.0.0.0
-      PORT: '8787'
+      SOLVER_CONFIG_JSON: |
+        {
+          "network": "regtest",
+          "rails": {
+            "arkade": {
+              "mnemonic": "planet travel grab found idle ripple acoustic hero normal mixed rich lamp",
+              "operatorUrl": "http://arkd:7070",
+              "emulatorUrl": "http://emulator:7073",
+              "esploraUrl": "http://mempool_web/api",
+              "covclaimdUrl": "http://covclaimd:7071"
+            },
+            "lightning": {
+              "backend": "lnd",
+              "lnd": {
+                "socket": "lnd:10009",
+                "certPath": "/lnd/tls.cert",
+                "macaroonPath": "/lnd/data/chain/bitcoin/regtest/admin.macaroon"
+              }
+            },
+            "onchain": {
+              "esploraUrl": "http://mempool_web/api"
+            }
+          },
+          "relay": {
+            "url": "ws://strfry:7777"
+          },
+          "http": {
+            "host": "0.0.0.0",
+            "port": 8787
+          },
+          "corridors": {
+            "arkade:BTC->lightning:BTC": {},
+            "lightning:BTC->arkade:BTC": {},
+            "arkade:BTC->onchain:BTC": {}
+          }
+        }
     ports:
       - '${INTENT_SOLVER_PORT:-8787}:8787'
     volumes:
@@ -552,7 +534,7 @@ services:
   # up verified; live offline quotes additionally need the solver's relay
   # ingress (its `relay` mode), which this stack does not run — see README.
   lnurl-server:
-    image: ${LNURL_IMAGE:-ghcr.io/arklabshq/lnurl-server:0.3.3}
+    image: ${LNURL_IMAGE:-ghcr.io/arklabshq/lnurl-server:0.6.0}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}lnurl-server
     profiles: ['lnurl']
     restart: unless-stopped
