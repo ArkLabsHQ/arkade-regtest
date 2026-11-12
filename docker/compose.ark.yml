@@ -290,11 +290,32 @@ services:
   # Published on 7280 (public API) and 7281 (admin UI): arkade-explorer holds 7080.
   # Fulcrum is already up with `base`. A zero min expiry lets regtest delegations
   # be shorter than the 24h production default.
+  # One-shot, as for bucket-sync: the executor migrates its own schema but needs
+  # the database to exist, and a database of its own keeps its tables apart from
+  # what an older delegatee left in postgres's default one.
+  executor-initdb:
+    image: ${POSTGRES_IMAGE:-postgres:16}
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}executor-initdb
+    profiles: ['executor']
+    restart: 'no'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint:
+      - sh
+      - -c
+      - |
+        PGPASSWORD=postgres psql -h postgres -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'executor'" | grep -q 1 || \
+        PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE DATABASE executor"
+
   executor:
     image: ${EXECUTOR_IMAGE:-ghcr.io/arkade-os/executor:v0.0.4-rc.1}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}executor
     profiles: ['executor']
     restart: unless-stopped
+    depends_on:
+      executor-initdb:
+        condition: service_completed_successfully
     ports:
       - '${EXECUTOR_HTTP_PORT:-7280}:7080'
       - '${EXECUTOR_ADMIN_PORT:-7281}:7081'
@@ -302,11 +323,12 @@ services:
       EXECUTOR_ARK_URL: arkd:7070
       EXECUTOR_EMULATOR_URL: emulator:7073
       EXECUTOR_ELECTRUM_URL: tcp://fulcrum:50001
-      EXECUTOR_DATABASE_URL: postgres://postgres@postgres:5432/postgres?sslmode=disable
+      EXECUTOR_DATABASE_URL: postgres://postgres@postgres:5432/executor?sslmode=disable
       EXECUTOR_COSIGNER_KEY: ${EXECUTOR_COSIGNER_KEY:-5c2b7d0e8f1a3c4b6d9e0f2a1b3c5d7e9f0a2b4c6d8e0f1a3b5c7d9e1f0a2b4c}
       EXECUTOR_ENCRYPTION_KEY: ${EXECUTOR_ENCRYPTION_KEY:-52630dbae959b43a069280e1ece67fc4fe31e10b448f7a6a7c67186ddf6a1922}
       EXECUTOR_ADMIN_AUTH: disabled
       EXECUTOR_MIN_DELEGATION_EXPIRY: '0'
+      EXECUTOR_RESERVE: ${EXECUTOR_RESERVE:-15m}
 
   # ── Solver (arkade virtual-mempool intent solver) — profile `solver` ───────
   # Depends on arkd (SOLVER_ARK_URL) and the emulator (SOLVER_EMULATOR_URL), so
