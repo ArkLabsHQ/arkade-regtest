@@ -15,7 +15,7 @@
 //   ark → base,  delegate → ark,  lightning → ark,  emulator → ark,
 //   solver → ark + emulator,  intent-solver → ark + emulator + lightning + nostr,
 //   lnurl → ark + emulator + covclaimd + intent-solver + nostr,
-//   executor → ark + emulator,
+//   executor → ark + emulator (`delegatee`, its old name, still works),
 //   sync → base,  nostr → base. `--profile lightning` brings up base+ark+lnd-peer;
 //   `--profile sync` / `--profile nostr` skip the Ark stack entirely.
 //   Selection precedence: --profile flags > REGTEST_PROFILES env (comma-list)
