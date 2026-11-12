@@ -81,7 +81,7 @@ Services are grouped into compose profiles so you can bring up just the tier you
 | `emulator`      | emulator                                                          | `ark`                      |
 | `solver`        | solver, pricefeed                                                 | `ark`, `emulator`          |
 | `intent-solver` | intent-solver                                                     | `ark`, `emulator`, `lightning`, `nostr` |
-| `delegatee`     | delegatee                                                         | `ark`, `emulator`          |
+| `executor`      | executor                                                          | `ark`, `emulator`          |
 | `lnurl`         | lnurl-server                                                      | `ark`, `emulator`, `covclaimd`, `intent-solver`, `nostr` |
 | `evm-e2e`       | anvil, evm-pricefeed, evm-init, intent-solver-evm-send, intent-solver-evm-receive | `ark`, `emulator`          |
 | `sync`          | bucket-sync, bucket-sync-initdb                                   | `base`                     |
@@ -93,6 +93,7 @@ node regtest.mjs start --profile base       # just the chain + explorer/indexer
 node regtest.mjs start --profile ark        # base + ark (incl. web wallet + explorer)
 node regtest.mjs start --profile lightning  # base + ark + lnd-peer, channel opened and balanced
 node regtest.mjs start --profile solver     # base + ark + emulator + solver
+node regtest.mjs start --profile executor   # base + ark + emulator + executor
 node regtest.mjs start --profile intent-solver   # base + ark + emulator + lightning + nostr + the swap solver
 node regtest.mjs start --profile lnurl           # ... + covclaimd + LNURL-pay/LN-address server with offline receives
 node regtest.mjs start --profile evm-e2e    # base + ark + emulator + EVM swap solvers (Anvil + ERC20Swap)
@@ -398,6 +399,7 @@ curl -X POST http://localhost:28788/rfq \
 | Web wallet                 | `http://localhost:3003`                       | 3003         | 23003        |
 | Arkade explorer            | `http://localhost:7080`                       | 7080         | 27080        |
 | Emulator                   | `http://localhost:7073`                       | 7073         | 27073        |
+| Executor                   | `http://localhost:7280` (admin `7281`)        | 7280         | —            |
 | Solver HTTP                | `http://localhost:7091`                       | 7091         | —            |
 | Solver gRPC                | `localhost:7090`                              | 7090         | —            |
 | Pricefeed                  | `http://localhost:8088`                       | 8088         | —            |
