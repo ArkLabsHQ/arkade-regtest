@@ -15,7 +15,7 @@
 //   ark → base,  delegate → ark,  lightning → ark,  emulator → ark,
 //   solver → ark + emulator,  intent-solver → ark + emulator + lightning + nostr,
 //   lnurl → ark + emulator + covclaimd + intent-solver + nostr,
-//   delegatee → ark + emulator,
+//   executor → ark + emulator,
 //   sync → base,  nostr → base. `--profile lightning` brings up base+ark+lnd-peer;
 //   `--profile sync` / `--profile nostr` skip the Ark stack entirely.
 //   Selection precedence: --profile flags > REGTEST_PROFILES env (comma-list)
@@ -299,7 +299,9 @@ function banner(active) {
   if (active.has('emulator')) {
     lines.push(`  Emulator        http://localhost:${env('EMULATOR_PORT', '7073')}`);
   }
-  if (active.has('delegatee')) lines.push('  delegatee       http://localhost:7280');
+  if (active.has('executor')) {
+    lines.push(`  Executor        http://localhost:${env('EXECUTOR_HTTP_PORT', '7280')}  (admin :${env('EXECUTOR_ADMIN_PORT', '7281')})`);
+  }
   if (active.has('covclaimd')) {
     lines.push(`  covclaimd       http://localhost:${env('COVCLAIMD_HTTP_PORT', '7271')}`);
   }
@@ -348,12 +350,13 @@ async function start(opts) {
   const requested = opts.profiles.length ? opts.profiles : fromEnv.length ? fromEnv : DEFAULT_PROFILES;
   const active = new Set(resolveProfiles(requested));
 
-  // Emulator opt-out: clearing EMULATOR_IMAGE disables it — and the solver +
-  // covclaimd, which both require the emulator.
+  // Emulator opt-out: clearing EMULATOR_IMAGE disables it — and the solver,
+  // covclaimd and executor, which require the emulator.
   if (!env('EMULATOR_IMAGE')) {
     if (active.delete('emulator')) log('Emulator disabled (EMULATOR_IMAGE empty)');
     if (active.delete('solver')) warn('Solver needs the emulator; skipping it (EMULATOR_IMAGE is empty)');
     if (active.delete('covclaimd')) warn('covclaimd needs the emulator; skipping it (EMULATOR_IMAGE is empty)');
+    if (active.delete('executor')) warn('executor needs the emulator; skipping it (EMULATOR_IMAGE is empty)');
     if (active.delete('intent-solver')) warn('intent-solver needs the emulator; skipping it (EMULATOR_IMAGE is empty)');
   }
 
@@ -436,8 +439,8 @@ async function start(opts) {
   if (active.has('emulator')) await startEmulator();
   if (active.has('covclaimd')) await startCovclaimd();
   // started in the wave above, it restarts until arkd and the emulator answer
-  if (active.has('delegatee')) {
-    await waitForOrFail('delegatee /v1/info', () => httpOk('http://localhost:7280/v1/info'), { attempts: 60 });
+  if (active.has('executor')) {
+    await waitForOrFail('executor /v1/info', () => httpOk(`http://localhost:${env('EXECUTOR_HTTP_PORT', '7280')}/v1/info`), { attempts: 60 });
   }
   if (active.has('solver')) await setupSolver();
   if (active.has('intent-solver')) await startIntentSolver();
