@@ -234,7 +234,7 @@ services:
 
   # ── Emulator (arkade-script signing service) — profile-gated, started last ──
   emulator:
-    image: ${EMULATOR_IMAGE:-ghcr.io/arkade-os/emulator:v0.0.9}
+    image: ${EMULATOR_IMAGE:-ghcr.io/arkade-os/emulator:v0.0.10-rc.0}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}emulator
     restart: unless-stopped
     profiles:
@@ -291,7 +291,7 @@ services:
   # Fulcrum is already up with `base`. A zero min expiry lets regtest delegations
   # be shorter than the 24h production default.
   executor:
-    image: ${EXECUTOR_IMAGE:-ghcr.io/arkade-os/executor:v0.0.4-rc.1}
+    image: ${EXECUTOR_IMAGE:-ghcr.io/arkade-os/executor:v0.0.4-rc.2}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}executor
     profiles: ['executor']
     restart: unless-stopped
