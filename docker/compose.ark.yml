@@ -211,7 +211,7 @@ services:
       - '${WALLET_PORT:-3003}:80'
     environment:
       - VITE_ARK_SERVER=http://localhost:7070
-      - VITE_NOSTR_RELAY_URL=ws://localhost:10547
+      - VITE_NOSTR_RELAY_URL=ws://localhost:7777
       - VITE_DELEGATOR_URL=http://localhost:${DELEGATOR_HTTP_PORT:-7012}
     restart: unless-stopped
 
