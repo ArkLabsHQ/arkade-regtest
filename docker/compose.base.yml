@@ -177,10 +177,12 @@ services:
     profiles: ['base']
     restart: unless-stopped
     volumes:
-      - ./docker/mock-pools:/data:ro
+      - ./mock-pools:/data:ro
     command: python3 -m http.server 8123 --directory /data --bind 0.0.0.0
+    ports:
+      - '${MEMPOOL_MOCK_POOLS_PORT:-8123}:8123'
     healthcheck:
-      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:8123/pools-v2.json']
+      test: ['CMD', 'wget', '-q', '--spider', 'http://mempool_mock_pools:8123/pools-v2.json']
       interval: 5s
       timeout: 5s
       retries: 5
