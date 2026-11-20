@@ -26,41 +26,8 @@ jobs:
       - name: Test CLI helpers
         run: node --test
 
-      - name: Set up mock pools server
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/mock-pools
-
-          cat << 'EOF' > /tmp/mock-pools/pools-v2.json
-          {
-            "coinbase_tags": {},
-            "payout_addresses": {},
-            "slugs": {}
-          }
-          EOF
-
-          cat << 'EOF' > /tmp/mock-pools/tree.json
-          {
-            "sha": "0000000000000000000000000000000000000000",
-            "tree": [
-              {
-                "path": "pools-v2.json",
-                "sha": "1111111111111111111111111111111111111111"
-              }
-            ]
-          }
-          EOF
-
-          # Start HTTP server in the background
-          python3 -m http.server 8123 --directory /tmp/mock-pools &
-          sleep 2
-          echo "Mock pools server started on http://127.0.0.1:8123"
-
       - name: Start regtest environment
         run: node regtest.mjs start
-        env:
-          MEMPOOL_POOLS_JSON_URL: 'http://127.0.0.1:8123/pools-v2.json'
-          MEMPOOL_POOLS_JSON_TREE_URL: 'http://127.0.0.1:8123/tree.json'
 
       - name: Verify services
         run: |

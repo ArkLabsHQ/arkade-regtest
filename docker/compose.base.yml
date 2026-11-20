@@ -170,6 +170,23 @@ services:
       - '${FULCRUM_TCP_PORT:-50001}:50001'
       - '${FULCRUM_WS_PORT:-50003}:50003'
 
+  # ── Mock pools server (serves Mempool's POOLS_JSON_URL in regtest) ─────────
+  mempool_mock_pools:
+    image: python:3.11-alpine
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}mempool_mock_pools
+    profiles: ['base']
+    restart: unless-stopped
+    volumes:
+      - ./docker/mock-pools:/data:ro
+    command: python3 -m http.server 8123 --directory /data --bind 0.0.0.0
+    ports:
+      - '${MEMPOOL_MOCK_POOLS_PORT:-8123}:8123'
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:8123/pools-v2.json']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   # ── mempool: MariaDB + backend API + web frontend ──────────────────────────
   mempool_mariadb:
     image: ${MARIADB_IMAGE:-mariadb:10.5}
@@ -199,6 +216,7 @@ services:
     depends_on:
       - mempool_mariadb
       - fulcrum
+      - mempool_mock_pools
     environment:
       # Bitcoin Core RPC
       CORE_RPC_HOST: bitcoin
@@ -227,10 +245,10 @@ services:
       MEMPOOL_STDOUT_LOG_MIN_PRIORITY: debug
       STATISTICS_ENABLED: 'false'
       LIGHTNING_ENABLED: 'false'
-      # Mining pools configuration (regtest)
+      # Mining pools configuration (regtest) — served by mempool_mock_pools service
       AUTOMATIC_POOLS_UPDATE: 'false'
-      MEMPOOL_POOLS_JSON_URL: '${MEMPOOL_POOLS_JSON_URL:-http://127.0.0.1:8123/pools-v2.json}'
-      MEMPOOL_POOLS_JSON_TREE_URL: '${MEMPOOL_POOLS_JSON_TREE_URL:-http://127.0.0.1:8123/tree.json}'
+      POOLS_JSON_URL: 'http://mempool_mock_pools:8123/pools-v2.json'
+      POOLS_JSON_TREE_URL: 'http://mempool_mock_pools:8123/tree.json'
       NODE_OPTIONS: '--max-old-space-size=2048'
     volumes:
       - mempool_api_datadir:/backend/cache
