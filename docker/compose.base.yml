@@ -245,8 +245,8 @@ services:
       LIGHTNING_ENABLED: 'false'
       # Mining pools configuration (regtest) — served by mempool_mock_pools service
       AUTOMATIC_POOLS_UPDATE: 'false'
-      POOLS_JSON_URL: 'http://mempool_mock_pools:8123/pools-v2.json'
-      POOLS_JSON_TREE_URL: 'http://mempool_mock_pools:8123/tree.json'
+      MEMPOOL_POOLS_JSON_URL: 'http://mempool_mock_pools:8123/pools-v2.json'
+      MEMPOOL_POOLS_JSON_TREE_URL: 'http://mempool_mock_pools:8123/tree.json'
       NODE_OPTIONS: '--max-old-space-size=2048'
     volumes:
       - mempool_api_datadir:/backend/cache
