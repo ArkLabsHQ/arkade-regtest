@@ -227,6 +227,10 @@ services:
       MEMPOOL_STDOUT_LOG_MIN_PRIORITY: debug
       STATISTICS_ENABLED: "false"
       LIGHTNING_ENABLED: "false"
+      # Mining pools configuration (regtest)
+      AUTOMATIC_POOLS_UPDATE: "false"
+      POOLS_JSON_URL: "${MEMPOOL_POOLS_JSON_URL:-http://127.0.0.1:8088/pools-v2.json}"
+      POOLS_JSON_TREE_URL: "${MEMPOOL_POOLS_JSON_TREE_URL:-http://127.0.0.1:8088/tree.json}"
       NODE_OPTIONS: "--max-old-space-size=2048"
     volumes:
       - mempool_api_datadir:/backend/cache
