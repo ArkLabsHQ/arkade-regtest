@@ -179,8 +179,6 @@ services:
     volumes:
       - ./docker/mock-pools:/data:ro
     command: python3 -m http.server 8123 --directory /data --bind 0.0.0.0
-    ports:
-      - '${MEMPOOL_MOCK_POOLS_PORT:-8123}:8123'
     healthcheck:
       test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:8123/pools-v2.json']
       interval: 5s
@@ -214,9 +212,12 @@ services:
     # after `compose up`, so this waits in-container instead of via depends_on health.
     command: './wait-for-it.sh mempool_mariadb:3306 --timeout=720 --strict -- ./wait-for-it.sh fulcrum:50001 --timeout=720 --strict -- ./start.sh'
     depends_on:
-      - mempool_mariadb
-      - fulcrum
-      - mempool_mock_pools
+      mempool_mariadb:
+        condition: service_started
+      fulcrum:
+        condition: service_started
+      mempool_mock_pools:
+        condition: service_healthy
     environment:
       # Bitcoin Core RPC
       CORE_RPC_HOST: bitcoin
