@@ -212,12 +212,9 @@ services:
     # after `compose up`, so this waits in-container instead of via depends_on health.
     command: './wait-for-it.sh mempool_mariadb:3306 --timeout=720 --strict -- ./wait-for-it.sh fulcrum:50001 --timeout=720 --strict -- ./start.sh'
     depends_on:
-      mempool_mariadb:
-        condition: service_started
-      fulcrum:
-        condition: service_started
-      mempool_mock_pools:
-        condition: service_healthy
+      - mempool_mariadb
+      - fulcrum
+      - mempool_mock_pools
     environment:
       # Bitcoin Core RPC
       CORE_RPC_HOST: bitcoin
