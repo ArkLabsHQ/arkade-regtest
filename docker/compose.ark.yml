@@ -394,8 +394,7 @@ services:
               "mnemonic": "planet travel grab found idle ripple acoustic hero normal mixed rich lamp",
               "operatorUrl": "http://arkd:7070",
               "emulatorUrl": "http://emulator:7073",
-              "esploraUrl": "http://mempool_web/api",
-              "covclaimdUrl": "http://covclaimd:7071"
+              "esploraUrl": "http://mempool_web/api"
             },
             "lightning": {
               "backend": "lnd",
