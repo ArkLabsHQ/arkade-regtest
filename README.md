@@ -232,10 +232,10 @@ It runs in the `intent-solver` profile at `http://localhost:${INTENT_SOLVER_PORT
 The profile is **on by default**, pinned in `.env.defaults`:
 
 ```bash
-INTENT_SOLVER_IMAGE=ghcr.io/arkade-os/intent-solver:0.3.1
+INTENT_SOLVER_IMAGE=ghcr.io/arkade-os/intent-solver:0.7.1
 ```
 
-Note the tag has no leading `v`: the solver's `release.yml` renders `type=semver,pattern={{version}}`, so the git tag `v0.3.1` publishes the image tag `0.3.1`. Pin `v0.3.1` and the pull fails.
+The solver's `release.yml` publishes the Git tag `v0.7.1` as the image tag `0.7.1`.
 
 Clear the variable to turn the profile off — `start` then logs `intent-solver disabled (INTENT_SOLVER_IMAGE empty), skipping...` and carries on, the same "clear the image to disable it" idiom as `EMULATOR_IMAGE`.
 
