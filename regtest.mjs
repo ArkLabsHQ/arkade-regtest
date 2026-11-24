@@ -34,6 +34,7 @@ import { setupArkd, applyArkdFees } from './lib/setup/arkd.mjs';
 import { setupDelegator } from './lib/setup/fulmine.mjs';
 import { setupLightning } from './lib/setup/lightning.mjs';
 import { setupSolver } from './lib/setup/solver.mjs';
+import { setupTaxi } from './lib/setup/taxi.mjs';
 import { setupLnurl, clearLnurlCards } from './lib/setup/lnurl.mjs';
 import { createInvoice, payInvoice } from './lib/invoice.mjs';
 import { rotateSigner, setSigners, signerInfo, clearSignerState } from './lib/setup/signer.mjs';
@@ -299,6 +300,9 @@ function banner(active) {
   if (active.has('emulator')) {
     lines.push(`  Emulator        http://localhost:${env('EMULATOR_PORT', '7073')}`);
   }
+  if (active.has('taxi')) {
+    lines.push(`  Taxi            http://localhost:${env('TAXI_HTTP_PORT', '8080')}  (admin :${env('TAXI_ADMIN_PORT', '8081')})`);
+  }
   if (active.has('executor')) {
     lines.push(`  Executor        http://localhost:${env('EXECUTOR_HTTP_PORT', '7280')}  (admin :${env('EXECUTOR_ADMIN_PORT', '7281')})`);
   }
@@ -350,6 +354,8 @@ async function start(opts) {
   const requested = opts.profiles.length ? opts.profiles : fromEnv.length ? fromEnv : DEFAULT_PROFILES;
   const active = new Set(resolveProfiles(requested));
 
+  if (active.has('taxi') && !env('EMULATOR_IMAGE')) fail('taxi requires EMULATOR_IMAGE');
+
   // Emulator opt-out: clearing EMULATOR_IMAGE disables it — and the solver,
   // covclaimd and executor, which require the emulator.
   if (!env('EMULATOR_IMAGE')) {
@@ -397,7 +403,7 @@ async function start(opts) {
   // lnurl-server rides along: its cards file does not exist until setupLnurl()
   // asks the running solver for its card, so the wave would bind-mount a
   // directory over the file path instead.
-  const waveProfiles = profiles.filter((p) => p !== 'intent-solver' && p !== 'lnurl' && p !== 'evm-e2e');
+  const waveProfiles = profiles.filter((p) => p !== 'intent-solver' && p !== 'lnurl' && p !== 'evm-e2e' && p !== 'taxi');
 
   // Stagger startup when the closure is more than just base. Bringing up all
   // ~18 containers at once overwhelms Docker's embedded DNS (arkd <-> arkd-wallet
@@ -437,6 +443,7 @@ async function start(opts) {
   if (active.has('delegate')) await setupDelegator();
   if (active.has('lightning')) await setupLightning();
   if (active.has('emulator')) await startEmulator();
+  if (active.has('taxi')) await setupTaxi();
   if (active.has('covclaimd')) await startCovclaimd();
   // started in the wave above, it restarts until arkd and the emulator answer
   if (active.has('executor')) {
