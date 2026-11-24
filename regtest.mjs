@@ -15,7 +15,7 @@
 //   ark → base,  delegate → ark,  lightning → ark,  emulator → ark,
 //   solver → ark + emulator,  intent-solver → ark + emulator + lightning + nostr,
 //   lnurl → ark + emulator + covclaimd + intent-solver + nostr,
-//   delegatee → ark + emulator,
+//   executor → ark + emulator,
 //   sync → base,  nostr → base. `--profile lightning` brings up base+ark+lnd-peer;
 //   `--profile sync` / `--profile nostr` skip the Ark stack entirely.
 //   Selection precedence: --profile flags > REGTEST_PROFILES env (comma-list)
@@ -303,7 +303,9 @@ function banner(active) {
   if (active.has('taxi')) {
     lines.push(`  Taxi            http://localhost:${env('TAXI_HTTP_PORT', '8080')}  (admin :${env('TAXI_ADMIN_PORT', '8081')})`);
   }
-  if (active.has('delegatee')) lines.push('  delegatee       http://localhost:7280');
+  if (active.has('executor')) {
+    lines.push(`  Executor        http://localhost:${env('EXECUTOR_HTTP_PORT', '7280')}  (admin :${env('EXECUTOR_ADMIN_PORT', '7281')})`);
+  }
   if (active.has('covclaimd')) {
     lines.push(`  covclaimd       http://localhost:${env('COVCLAIMD_HTTP_PORT', '7271')}`);
   }
@@ -352,14 +354,15 @@ async function start(opts) {
   const requested = opts.profiles.length ? opts.profiles : fromEnv.length ? fromEnv : DEFAULT_PROFILES;
   const active = new Set(resolveProfiles(requested));
 
-  // Emulator opt-out: clearing EMULATOR_IMAGE disables it — and the solver +
-  // covclaimd, which both require the emulator.
   if (active.has('taxi') && !env('EMULATOR_IMAGE')) fail('taxi requires EMULATOR_IMAGE');
 
+  // Emulator opt-out: clearing EMULATOR_IMAGE disables it — and the solver,
+  // covclaimd and executor, which require the emulator.
   if (!env('EMULATOR_IMAGE')) {
     if (active.delete('emulator')) log('Emulator disabled (EMULATOR_IMAGE empty)');
     if (active.delete('solver')) warn('Solver needs the emulator; skipping it (EMULATOR_IMAGE is empty)');
     if (active.delete('covclaimd')) warn('covclaimd needs the emulator; skipping it (EMULATOR_IMAGE is empty)');
+    if (active.delete('executor')) warn('executor needs the emulator; skipping it (EMULATOR_IMAGE is empty)');
     if (active.delete('intent-solver')) warn('intent-solver needs the emulator; skipping it (EMULATOR_IMAGE is empty)');
   }
 
@@ -443,8 +446,8 @@ async function start(opts) {
   if (active.has('taxi')) await setupTaxi();
   if (active.has('covclaimd')) await startCovclaimd();
   // started in the wave above, it restarts until arkd and the emulator answer
-  if (active.has('delegatee')) {
-    await waitForOrFail('delegatee /v1/info', () => httpOk('http://localhost:7280/v1/info'), { attempts: 60 });
+  if (active.has('executor')) {
+    await waitForOrFail('executor /v1/info', () => httpOk(`http://localhost:${env('EXECUTOR_HTTP_PORT', '7280')}/v1/info`), { attempts: 60 });
   }
   if (active.has('solver')) await setupSolver();
   if (active.has('intent-solver')) await startIntentSolver();
@@ -469,7 +472,7 @@ async function stop() {
 async function clean(opts) {
   log(`Removing ${env('REGTEST_PROJECT', 'arkade-regtest')} containers and volumes...`);
   composeDown({ volumes: true });
-  // arkd-wallet's volume is gone, so the persisted signer set no longer applies.
+  // The signer is recreated from defaults on next start, so the persisted set no longer applies.
   clearSignerState();
   // The solver card the lnurl-server run read is gone with the solver that signed it.
   clearLnurlCards();

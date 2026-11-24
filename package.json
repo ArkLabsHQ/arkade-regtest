@@ -14,6 +14,7 @@
     "start": "node regtest.mjs start",
     "stop": "node regtest.mjs stop",
     "clean": "node regtest.mjs clean",
+    "mine": "node regtest.mjs mine",
     "test": "node --test"
   }
 }

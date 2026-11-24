@@ -16,9 +16,9 @@
 name: arkade-regtest
 
 services:
-  # ── arkd wallet (signer + on-chain wallet, backed by nbxplorer) ────────────
+  # ── arkd wallet (on-chain wallet, backed by nbxplorer) ─────────────────────
   arkd-wallet:
-    image: ${ARKD_WALLET_IMAGE:-ghcr.io/arkade-os/arkd-wallet:v0.9.15}
+    image: ${ARKD_WALLET_IMAGE:-ghcr.io/arkade-os/arkd-wallet:v0.9.25}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}arkd-wallet
     profiles: ['ark']
     restart: unless-stopped
@@ -34,33 +34,72 @@ services:
       - ARKD_WALLET_LOG_LEVEL=5
       - ARKD_WALLET_NBXPLORER_URL=http://nbxplorer:32838
       - ARKD_WALLET_NETWORK=regtest
-      # Default to a KNOWN regtest signer key so arkd-wallet does not self-generate
-      # one. Signer rotation needs the *current* signer's private key to advertise
-      # it as a deprecated signer on rotation; a self-generated key is unknown to
-      # the CLI and cannot be deprecated. (Matches arkd's own e2e default.)
-      - ARKD_WALLET_SIGNER_KEY=${ARKD_WALLET_SIGNER_KEY:-afcd3fa10f82a05fddc9574fdb13b3991b568e89cc39a72ba4401df8abef35f0}
-      - ARKD_WALLET_DEPRECATED_SIGNER_KEYS=${ARKD_WALLET_DEPRECATED_SIGNER_KEYS:-}
     ports:
       - '${ARKD_WALLET_PORT:-6060}:6060'
     volumes:
       - ark_wallet_datadir:/app/data
 
+  # ── arkd signer (VTXO signing key, standalone since arkd v0.9.25) ──────────
+  # Holds the operator's signer key (and any deprecated ones). Not published: it
+  # has no auth, so only arkd reaches it, over the compose network. The default
+  # key is a KNOWN regtest one so signer rotation can advertise it as deprecated
+  # (arkd needs the deprecated PRIVATE key to co-sign migration of old funds).
+  arkd-signer:
+    image: ${ARKD_SIGNER_IMAGE:-ghcr.io/arkade-os/arkd-signer:v0.9.25}
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}arkd-signer
+    profiles: ['ark']
+    restart: unless-stopped
+    expose:
+      - '6061'
+    environment:
+      - ARKD_SIGNER_LOG_LEVEL=5
+      - ARKD_SIGNER_PORT=6061
+      - ARKD_SIGNER_SECRET_KEY=${ARKD_SIGNER_SECRET_KEY:-afcd3fa10f82a05fddc9574fdb13b3991b568e89cc39a72ba4401df8abef35f0}
+      - ARKD_SIGNER_DEPRECATED_KEYS=${ARKD_SIGNER_DEPRECATED_KEYS:-}
+
+  # ── Redis (arkd's live store; required since arkd v0.9.25) ─────────────────
+  redis:
+    image: ${REDIS_IMAGE:-redis:7-alpine}
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}redis
+    profiles: ['ark']
+    restart: unless-stopped
+    # Intentionally ephemeral: no volume / appendonly. arkd's live store is rebuilt on boot.
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
   # ── arkd (Ark server) ──────────────────────────────────────────────────────
   arkd:
-    image: ${ARKD_IMAGE:-ghcr.io/arkade-os/arkd:v0.9.15}
+    image: ${ARKD_IMAGE:-ghcr.io/arkade-os/arkd:v0.9.25}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}arkd
     profiles: ['ark']
     restart: unless-stopped
     depends_on:
-      - arkd-wallet
+      arkd-wallet:
+        condition: service_started
+      arkd-signer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     environment:
       - ARKD_NO_TLS=true
       - ARKD_NO_MACAROONS=true
       - ARKD_WALLET_ADDR=arkd-wallet:6060
+      - ARKD_SIGNER_ADDR=arkd-signer:6061
       - ARKD_ESPLORA_URL=http://mempool_web/api
       - ARKD_VTXO_MIN_AMOUNT=1
-      - ARKD_DB_TYPE=sqlite
-      - ARKD_EVENT_DB_TYPE=badger
+      # Postgres + Redis only since arkd v0.9.25 (sqlite/badger/inmemory are gone). The
+      # shared base postgres runs trust auth; arkd creates its two databases itself.
+      - ARKD_DB_TYPE=postgres
+      - ARKD_PG_DB_URL=postgresql://postgres@postgres:5432/projection?sslmode=disable
+      - ARKD_PG_EVENT_DB_URL=postgresql://postgres@postgres:5432/event?sslmode=disable
+      - ARKD_PG_DB_AUTOCREATE=true
+      - ARKD_EVENT_DB_TYPE=postgres
+      - ARKD_REDIS_URL=redis://redis:6379/0
       - ARKD_UNLOCKER_TYPE=env
       - ARKD_UNLOCKER_PASSWORD=${ARKD_PASSWORD:-secret}
       - ARKD_VTXO_TREE_EXPIRY=${ARKD_VTXO_TREE_EXPIRY:-180}
@@ -68,9 +107,12 @@ services:
       - ARKD_PUBLIC_UNILATERAL_EXIT_DELAY=${ARKD_PUBLIC_UNILATERAL_EXIT_DELAY:-5}
       - ARKD_BOARDING_EXIT_DELAY=${ARKD_BOARDING_EXIT_DELAY:-180}
       - ARKD_CHECKPOINT_EXIT_DELAY=${ARKD_CHECKPOINT_EXIT_DELAY:-5}
-      - ARKD_LIVE_STORE_TYPE=${ARKD_LIVE_STORE_TYPE:-inmemory}
+      - ARKD_LIVE_STORE_TYPE=${ARKD_LIVE_STORE_TYPE:-redis}
       - ARKD_LOG_LEVEL=${ARKD_LOG_LEVEL:-5}
-      - ARKD_SESSION_DURATION=${ARKD_SESSION_DURATION:-30}
+      - ARKD_SESSION_DURATION=${ARKD_SESSION_DURATION:-10}
+      # Block-typed delays count a block as one second here, so the 300s default margin would
+      # reject any boarding input with a delay under 300 blocks. Must be >= the session duration.
+      - ARKD_UNROLLED_VTXO_MIN_EXPIRY_MARGIN=${ARKD_UNROLLED_VTXO_MIN_EXPIRY_MARGIN:-10}
       # Single-participant rounds by default so a lone client can `ark settle`
       # in regtest (tests rarely have multiple simultaneous participants).
       - ARKD_ROUND_MIN_PARTICIPANTS_COUNT=${ARKD_ROUND_MIN_PARTICIPANTS_COUNT:-1}
@@ -169,7 +211,7 @@ services:
       - '${WALLET_PORT:-3003}:80'
     environment:
       - VITE_ARK_SERVER=http://localhost:7070
-      - VITE_NOSTR_RELAY_URL=ws://localhost:10547
+      - VITE_NOSTR_RELAY_URL=ws://localhost:7777
       - VITE_DELEGATOR_URL=http://localhost:${DELEGATOR_HTTP_PORT:-7012}
     restart: unless-stopped
 
@@ -192,7 +234,7 @@ services:
 
   # ── Emulator (arkade-script signing service) — profile-gated, started last ──
   emulator:
-    image: ${EMULATOR_IMAGE:-ghcr.io/arkade-os/emulator:v0.0.8}
+    image: ${EMULATOR_IMAGE:-ghcr.io/arkade-os/emulator:v0.0.10}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}emulator
     restart: unless-stopped
     profiles:
@@ -243,23 +285,28 @@ services:
       COVCLAIMD_REVEAL_ENABLED: 'true'
       COVCLAIMD_LOG_LEVEL: ${COVCLAIMD_LOG_LEVEL:-4}
 
-  # ── delegatee (renewal + boarding daemon) — profile `delegatee` ────────────
-  # Keeps its state in postgres's default database (arkd runs on sqlite here).
-  # Published on 7280: arkade-explorer holds 7080.
-  delegatee:
-    image: ${DELEGATEE_IMAGE:-ghcr.io/arkade-os/delegatee:v0.0.2}
-    container_name: ${REGTEST_CONTAINER_PREFIX:-}delegatee
-    profiles: ['delegatee']
+  # ── executor (renewal + boarding daemon) — profile `executor` ────────────
+  # Keeps its state in postgres's default database (arkd uses its own databases there).
+  # Published on 7280 (public API) and 7281 (admin UI): arkade-explorer holds 7080.
+  # Fulcrum is already up with `base`. A zero min expiry lets regtest delegations
+  # be shorter than the 24h production default.
+  executor:
+    image: ${EXECUTOR_IMAGE:-ghcr.io/arkade-os/executor:v0.0.5}
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}executor
+    profiles: ['executor']
     restart: unless-stopped
     ports:
-      - '7280:7080'
+      - '${EXECUTOR_HTTP_PORT:-7280}:7080'
+      - '${EXECUTOR_ADMIN_PORT:-7281}:7081'
     environment:
-      DELEGATEE_ARK_URL: arkd:7070
-      DELEGATEE_EMULATOR_URL: emulator:7073
-      DELEGATEE_EXPLORER_URL: http://mempool_web/api
-      DELEGATEE_DATABASE_URL: postgres://postgres@postgres:5432/postgres?sslmode=disable
-      DELEGATEE_DELEGATE_KEY: 5c2b7d0e8f1a3c4b6d9e0f2a1b3c5d7e9f0a2b4c6d8e0f1a3b5c7d9e1f0a2b4c
-      DELEGATEE_ADMIN_AUTH: disabled
+      EXECUTOR_ARK_URL: arkd:7070
+      EXECUTOR_EMULATOR_URL: emulator:7073
+      EXECUTOR_ELECTRUM_URL: tcp://fulcrum:50001
+      EXECUTOR_DATABASE_URL: postgres://postgres@postgres:5432/postgres?sslmode=disable
+      EXECUTOR_COSIGNER_KEY: ${EXECUTOR_COSIGNER_KEY:-5c2b7d0e8f1a3c4b6d9e0f2a1b3c5d7e9f0a2b4c6d8e0f1a3b5c7d9e1f0a2b4c}
+      EXECUTOR_ENCRYPTION_KEY: ${EXECUTOR_ENCRYPTION_KEY:-52630dbae959b43a069280e1ece67fc4fe31e10b448f7a6a7c67186ddf6a1922}
+      EXECUTOR_ADMIN_AUTH: disabled
+      EXECUTOR_MIN_DELEGATION_EXPIRY: '0'
 
   # ── Solver (arkade virtual-mempool intent solver) — profile `solver` ───────
   # Depends on arkd (SOLVER_ARK_URL) and the emulator (SOLVER_EMULATOR_URL), so
@@ -339,60 +386,41 @@ services:
     command: ['serve']
     user: root
     environment:
-      SWAP_NETWORK: regtest
-      ARK_SERVER_URL: http://arkd:7070
-      EMULATOR_URL: http://emulator:7073
-      # Receive legs reveal funded lockups to the claim daemon (offline-claim
-      # path), so the solver is told where covclaimd lives rather than
-      # discovering it has none at claim time.
-      COVCLAIMD_URL: http://covclaimd:7071
-      ARK_MNEMONIC: ${INTENT_SOLVER_MNEMONIC}
-      # For the REGISTRY CARD, not for swap ingress — the distinction matters
-      # and is easy to get backwards. `command: serve` starts the HTTP swap
-      # API and the money-mover; it does NOT subscribe to a relay. Only
-      # `command: relay` opens the RFQ ingress, and the two are alternatives:
-      # relay mode has no listening swap port.
-      #
-      # Verified rather than assumed: with this set and `serve` running, a
-      # trader publishing a signed RFQ to strfry gets `no reply within
-      # 30000ms`, while the same request over `POST /v1/swap` completes a
-      # swap. Both transports carry identical payloads — the difference is
-      # only which one this process is listening on.
-      #
-      # So what this buys is the card: the solver's published listing names a
-      # relay a client can reach it on, and the admin console can post an ad
-      # there. Swap over HTTP; to exercise the Nostr ingress instead, override
-      # `command` to `relay` and set ADMIN_PORT/ADMIN_HOST for a healthcheck,
-      # since relay mode publishes no HTTP port of its own.
-      #
-      # `ws://`, not `wss://`: strfry here terminates no TLS. Overridable for a
-      # deployment whose relay does (the lnurl-server cards file follows the
-      # same variable, so discovery keeps naming the relay both sides dial).
-      RELAY_URL: ${INTENT_SOLVER_RELAY_URL:-ws://strfry:7777}
-      # Explicit, never inferred: leaving this unset does not mean "no
-      # Lightning" — the app falls through to a hosted vendor backend, which
-      # would quietly ignore the lnd below and refuse every regtest swap.
-      LN_BACKEND: lnd
-      LND_SOCKET: lnd:10009
-      LND_CERT_PATH: /lnd/tls.cert
-      LND_MACAROON_PATH: /lnd/data/chain/bitcoin/regtest/admin.macaroon
-      # TWO explorers, because the two chains are watched by different clients
-      # and each defaults badly inside a container. mempool serves an Esplora
-      # API under /api, so one host answers both.
-      #
-      # The LIGHTNING side: LND's own chain view is wallet-scoped and carries
-      # no per-output values, so the onchain corridors need an explorer to see
-      # a client's funding transaction at all.
-      LND_ESPLORA_URL: http://mempool_web/api
-      # The ARKADE side, which is a different client with its own default: the
-      # SDK falls back to http://localhost:3000/api on regtest, and inside this
-      # container that resolves to the container itself. Left unset the solver
-      # logs "Failed to fetch chain tip; height-based expiry will not be
-      # evaluated" ONCE at startup and carries on — so the stack reads healthy
-      # while block-denominated VTXO expiry silently goes unwatched.
-      ARK_ESPLORA_URL: http://mempool_web/api
-      HOST: 0.0.0.0
-      PORT: '8787'
+      SOLVER_CONFIG_JSON: |
+        {
+          "network": "regtest",
+          "rails": {
+            "arkade": {
+              "mnemonic": "planet travel grab found idle ripple acoustic hero normal mixed rich lamp",
+              "operatorUrl": "http://arkd:7070",
+              "emulatorUrl": "http://emulator:7073",
+              "esploraUrl": "http://mempool_web/api"
+            },
+            "lightning": {
+              "backend": "lnd",
+              "lnd": {
+                "socket": "lnd:10009",
+                "certPath": "/lnd/tls.cert",
+                "macaroonPath": "/lnd/data/chain/bitcoin/regtest/admin.macaroon"
+              }
+            },
+            "onchain": {
+              "esploraUrl": "http://mempool_web/api"
+            }
+          },
+          "relay": {
+            "url": "ws://strfry:7777"
+          },
+          "http": {
+            "host": "0.0.0.0",
+            "port": 8787
+          },
+          "corridors": {
+            "arkade:BTC->lightning:BTC": {},
+            "lightning:BTC->arkade:BTC": {},
+            "arkade:BTC->onchain:BTC": {}
+          }
+        }
     ports:
       - '${INTENT_SOLVER_PORT:-8787}:8787'
     volumes:
@@ -510,7 +538,7 @@ services:
   # up verified; live offline quotes additionally need the solver's relay
   # ingress (its `relay` mode), which this stack does not run — see README.
   lnurl-server:
-    image: ${LNURL_IMAGE:-ghcr.io/arklabshq/lnurl-server:0.3.3}
+    image: ${LNURL_IMAGE:-ghcr.io/arklabshq/lnurl-server:0.6.0}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}lnurl-server
     profiles: ['lnurl']
     restart: unless-stopped

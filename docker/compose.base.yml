@@ -15,7 +15,7 @@ services:
   bitcoin:
     image: ${BITCOIN_IMAGE:-btcpayserver/bitcoin:31.0}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}bitcoin
-    profiles: ["base"]
+    profiles: ['base']
     restart: on-failure
     stop_grace_period: 30s
     environment:
@@ -56,7 +56,7 @@ services:
   bitcoin-miner:
     image: ${BITCOIN_IMAGE:-btcpayserver/bitcoin:31.0}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}bitcoin-miner
-    profiles: ["base"]
+    profiles: ['base']
     restart: unless-stopped
     depends_on:
       - bitcoin
@@ -81,7 +81,7 @@ services:
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:16}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}postgres
-    profiles: ["base"]
+    profiles: ['base']
     restart: unless-stopped
     # Exposed on the host so external consumers can reach the DBs directly — in
     # particular a BTCPay ServerTester, whose `explorer.postgres` reads
@@ -89,12 +89,12 @@ services:
     # host port, so BTCPay's default `explorer.postgres` (127.0.0.1:39372) and a
     # BTCPay app DB on the same server both work with no extra wiring (trust auth).
     ports:
-      - "${POSTGRES_PORT:-39372}:5432"
+      - '${POSTGRES_PORT:-39372}:5432'
     environment:
       POSTGRES_HOST_AUTH_METHOD: trust
       POSTGRES_DB: arkd
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d arkd"]
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d arkd']
       interval: 5s
       timeout: 5s
       retries: 20
@@ -106,7 +106,7 @@ services:
   nbxplorer:
     image: ${NBXPLORER_IMAGE:-nicolasdorier/nbxplorer:2.6.7}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}nbxplorer
-    profiles: ["base"]
+    profiles: ['base']
     restart: unless-stopped
     depends_on:
       postgres:
@@ -115,7 +115,7 @@ services:
         condition: service_started
     environment:
       NBXPLORER_NETWORK: regtest
-      NBXPLORER_CHAINS: "btc"
+      NBXPLORER_CHAINS: 'btc'
       NBXPLORER_BTCRPCURL: http://bitcoin:18443/
       NBXPLORER_BTCNODEENDPOINT: bitcoin:18444
       NBXPLORER_BTCRPCUSER: admin1
@@ -124,20 +124,20 @@ services:
       NBXPLORER_BIND: 0.0.0.0:32838
       NBXPLORER_TRIMEVENTS: 10000
       NBXPLORER_SIGNALFILESDIR: /datadir
-      NBXPLORER_POSTGRES: "User ID=postgres;Host=postgres;Port=5432;Application Name=nbxplorer;MaxPoolSize=20;Database=nbxplorer"
+      NBXPLORER_POSTGRES: 'User ID=postgres;Host=postgres;Port=5432;Application Name=nbxplorer;MaxPoolSize=20;Database=nbxplorer'
       NBXPLORER_EXPOSERPC: 1
       NBXPLORER_NOAUTH: 1
     volumes:
       - nbxplorer_datadir:/datadir
     ports:
-      - "${NBXPLORER_PORT:-32838}:32838"
+      - '${NBXPLORER_PORT:-32838}:32838'
     # NBXplorer only binds its HTTP port after it has finished DB migrations and
     # connected to bitcoind, so a listening port is a good "ready" signal. The
     # image is Ubuntu (bash + /dev/tcp, no curl/wget). Gating arkd-wallet on this
     # stops it from racing nbxplorer's first-boot (which otherwise causes the
     # "lookup nbxplorer: no such host" / arkd crash-loop chain).
     healthcheck:
-      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/32838'"]
+      test: ['CMD-SHELL', "bash -c '</dev/tcp/127.0.0.1/32838'"]
       interval: 5s
       timeout: 5s
       retries: 40
@@ -147,7 +147,7 @@ services:
   fulcrum:
     image: ${FULCRUM_IMAGE:-cculianu/fulcrum:latest}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}fulcrum
-    profiles: ["base"]
+    profiles: ['base']
     restart: on-failure
     stop_grace_period: 30s
     depends_on:
@@ -161,20 +161,37 @@ services:
       - --rpcuser
       - admin1
       - --rpcpassword
-      - "123"
+      - '123'
       - --tcp
       - 0.0.0.0:50001
       - --ws
       - 0.0.0.0:50003
     ports:
-      - "${FULCRUM_TCP_PORT:-50001}:50001"
-      - "${FULCRUM_WS_PORT:-50003}:50003"
+      - '${FULCRUM_TCP_PORT:-50001}:50001'
+      - '${FULCRUM_WS_PORT:-50003}:50003'
+
+  # ── Mock pools server (serves Mempool's POOLS_JSON_URL in regtest) ─────────
+  mempool_mock_pools:
+    image: python:3.11-alpine
+    container_name: ${REGTEST_CONTAINER_PREFIX:-}mempool_mock_pools
+    profiles: ['base']
+    restart: unless-stopped
+    volumes:
+      - ./mock-pools:/data:ro
+    command: python3 -m http.server 8123 --directory /data --bind 0.0.0.0
+    ports:
+      - '${MEMPOOL_MOCK_POOLS_PORT:-8123}:8123'
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://mempool_mock_pools:8123/pools-v2.json']
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   # ── mempool: MariaDB + backend API + web frontend ──────────────────────────
   mempool_mariadb:
     image: ${MARIADB_IMAGE:-mariadb:10.5}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}mempool_mariadb
-    profiles: ["base"]
+    profiles: ['base']
     restart: on-failure
     stop_grace_period: 1m
     environment:
@@ -188,56 +205,61 @@ services:
   mempool_api:
     image: ${MEMPOOL_BACKEND_IMAGE:-mempool/backend:v3.3.1}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}mempool_api
-    profiles: ["base"]
-    user: "1000:1000"
+    profiles: ['base']
+    user: '1000:1000'
     init: true
     restart: on-failure
     stop_grace_period: 1m
     # Fulcrum listens only once bitcoind has blocks, which the orchestrator mines
     # after `compose up`, so this waits in-container instead of via depends_on health.
-    command: "./wait-for-it.sh mempool_mariadb:3306 --timeout=720 --strict -- ./wait-for-it.sh fulcrum:50001 --timeout=720 --strict -- ./start.sh"
+    command: './wait-for-it.sh mempool_mariadb:3306 --timeout=720 --strict -- ./wait-for-it.sh fulcrum:50001 --timeout=720 --strict -- ./start.sh'
     depends_on:
       - mempool_mariadb
       - fulcrum
+      - mempool_mock_pools
     environment:
       # Bitcoin Core RPC
       CORE_RPC_HOST: bitcoin
-      CORE_RPC_PORT: "18443"
+      CORE_RPC_PORT: '18443'
       CORE_RPC_USERNAME: admin1
-      CORE_RPC_PASSWORD: "123"
-      CORE_RPC_TIMEOUT: "120000"
+      CORE_RPC_PASSWORD: '123'
+      CORE_RPC_TIMEOUT: '120000'
       # Electrum backend (Fulcrum)
       MEMPOOL_BACKEND: electrum
       ELECTRUM_HOST: fulcrum
-      ELECTRUM_PORT: "50001"
-      ELECTRUM_TLS_ENABLED: "false"
+      ELECTRUM_PORT: '50001'
+      ELECTRUM_TLS_ENABLED: 'false'
       # Database
-      DATABASE_ENABLED: "true"
+      DATABASE_ENABLED: 'true'
       DATABASE_HOST: mempool_mariadb
-      DATABASE_PORT: "3306"
+      DATABASE_PORT: '3306'
       DATABASE_DATABASE: mempool
       DATABASE_USERNAME: mempool
       DATABASE_PASSWORD: mempool
       # Core
       MEMPOOL_NETWORK: regtest
-      MEMPOOL_HTTP_PORT: "8999"
+      MEMPOOL_HTTP_PORT: '8999'
       MEMPOOL_CACHE_DIR: /backend/cache
-      MEMPOOL_POLL_RATE_MS: "2000"
-      MEMPOOL_INDEXING_BLOCKS_AMOUNT: "-1"
+      MEMPOOL_POLL_RATE_MS: '2000'
+      MEMPOOL_INDEXING_BLOCKS_AMOUNT: '-1'
       MEMPOOL_STDOUT_LOG_MIN_PRIORITY: debug
-      STATISTICS_ENABLED: "false"
-      LIGHTNING_ENABLED: "false"
-      NODE_OPTIONS: "--max-old-space-size=2048"
+      STATISTICS_ENABLED: 'false'
+      LIGHTNING_ENABLED: 'false'
+      # Mining pools configuration (regtest) — served by mempool_mock_pools service
+      AUTOMATIC_POOLS_UPDATE: 'false'
+      MEMPOOL_POOLS_JSON_URL: 'http://mempool_mock_pools:8123/pools-v2.json'
+      MEMPOOL_POOLS_JSON_TREE_URL: 'http://mempool_mock_pools:8123/tree.json'
+      NODE_OPTIONS: '--max-old-space-size=2048'
     volumes:
       - mempool_api_datadir:/backend/cache
     ports:
-      - "${MEMPOOL_API_PORT:-8999}:8999"
+      - '${MEMPOOL_API_PORT:-8999}:8999'
 
   mempool_web:
     image: ${MEMPOOL_FRONTEND_IMAGE:-mempool/frontend:v3.3.1}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}mempool_web
-    profiles: ["base"]
-    user: "1000:1000"
+    profiles: ['base']
+    user: '1000:1000'
     init: true
     restart: on-failure
     stop_grace_period: 1m
@@ -245,16 +267,16 @@ services:
     depends_on:
       - mempool_api
     environment:
-      FRONTEND_HTTP_PORT: "80"
+      FRONTEND_HTTP_PORT: '80'
       BACKEND_MAINNET_HTTP_HOST: mempool_api
     ports:
-      - "${MEMPOOL_WEB_PORT:-3000}:80"
+      - '${MEMPOOL_WEB_PORT:-3000}:80'
 
   # ── Counterparty Lightning node (lnd-peer opens a channel to this) ─────────
   lnd:
     image: ${LND_IMAGE:-btcpayserver/lnd:v0.19.3-beta}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}lnd
-    profiles: ["base"]
+    profiles: ['base']
     restart: unless-stopped
     stop_grace_period: 5m30s
     depends_on:
@@ -264,8 +286,8 @@ services:
     # no manual unlock, and lncli uses the default /root/.lnd path (so no
     # --lnddir needed, unlike the upstream lightninglabs image).
     environment:
-      LND_CHAIN: "btc"
-      LND_ENVIRONMENT: "regtest"
+      LND_CHAIN: 'btc'
+      LND_ENVIRONMENT: 'regtest'
       # BTCPay's initunlock wrapper curls this URL over http to auto-create/unlock
       # the wallet, so it must match restlisten + no-rest-tls (same pattern as
       # lnd-peer). Binding REST to the container hostname is accepted with
@@ -291,8 +313,8 @@ services:
     volumes:
       - lnd_datadir:/data
     ports:
-      - "${LND_P2P_PORT:-9735}:9735"
-      - "${LND_RPC_PORT:-10009}:10009"
+      - '${LND_P2P_PORT:-9735}:9735'
+      - '${LND_RPC_PORT:-10009}:10009'
 
 volumes:
   bitcoin_datadir:
