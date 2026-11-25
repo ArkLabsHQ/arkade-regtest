@@ -245,7 +245,7 @@ jobs:
         if: failure()
         run: |
           docker compose -f docker/compose.base.yml -f docker/compose.ark.yml ps || true
-          for c in bitcoin fulcrum mempool_api mempool_web nbxplorer arkd-wallet arkd-signer redis arkd arkade-wallet arkade-explorer lnd lnd-peer fulmine-delegator emulator solver intent-solver lnurl-server bucket-sync-initdb bucket-sync strfry; do
+          for c in bitcoin fulcrum mempool_api mempool_web nbxplorer arkd-wallet arkd-signer redis arkd arkade-wallet arkade-explorer lnd lnd-peer fulmine-delegator emulator executor solver intent-solver lnurl-server bucket-sync-initdb bucket-sync strfry; do
             echo "===== logs: $c ====="
             docker logs --tail 80 "$c" 2>&1 || true
           done
