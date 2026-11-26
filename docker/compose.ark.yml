@@ -291,7 +291,7 @@ services:
   # Fulcrum is already up with `base`. A zero min expiry lets regtest delegations
   # be shorter than the 24h production default.
   executor:
-    image: ${EXECUTOR_IMAGE:-ghcr.io/arkade-os/executor:v0.0.6-rc.1}
+    image: ${EXECUTOR_IMAGE:-ghcr.io/arkade-os/executor:v0.0.6}
     container_name: ${REGTEST_CONTAINER_PREFIX:-}executor
     profiles: ['executor']
     restart: unless-stopped
