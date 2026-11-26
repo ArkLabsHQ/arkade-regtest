@@ -1,0 +1,26 @@
+{
+  "name": "arkade-regtest-asset-rfq-smoke",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "bootstrap": "node --experimental-eventsource bootstrap.mjs",
+    "configure-market": "node --experimental-eventsource configure-market.mjs",
+    "smoke": "node --experimental-eventsource smoke-swaps.mjs",
+    "smoke:nostr": "node --experimental-eventsource smoke-nostr.mjs",
+    "balances": "node --experimental-eventsource balances.mjs",
+    "refill": "node --experimental-eventsource refill-trader1.mjs",
+    "recover": "node --experimental-eventsource recover.mjs"
+  },
+  "dependencies": {
+    "@arkade-os/sdk": "0.5.0-rc.8",
+    "@arkade-os/swap": "0.1.0-rc.11",
+    "@scure/base": "^1.2.5",
+    "@scure/bip39": "^1.5.4",
+    "eventsource": "^3.0.6",
+    "nostr-tools": "^2.12.0",
+    "ws": "^8.18.0"
+  }
+}
