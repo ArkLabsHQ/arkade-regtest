@@ -38,6 +38,7 @@ import { setupLnurl, clearLnurlCards } from './lib/setup/lnurl.mjs';
 import { createInvoice, payInvoice } from './lib/invoice.mjs';
 import { rotateSigner, setSigners, signerInfo, clearSignerState } from './lib/setup/signer.mjs';
 import { evmRpc, receiveRfqRequest, sendRfqRequest } from './lib/evm.mjs';
+import { reserveHostPorts } from './lib/ports.mjs';
 
 function parseArgs(argv) {
   const opts = { command: argv[0], env: '', clean: false, prune: false, confirm: false, cutoff: undefined, newKey: undefined, active: undefined, deprecated: undefined, profiles: [], positional: [] };
@@ -406,6 +407,9 @@ async function start(opts) {
   // fulcrum, mempool, postgres) FIRST, settle the chain + explorer, and only
   // THEN start the app layer (ark, lightning, ...) against a healthy base.
   const phased = active.has('base') && active.size > 1;
+
+  // Before compose publishes anything, so no outbound socket can take a host port first.
+  reserveHostPorts();
 
   const firstWave = composeUp([], { profiles: phased ? ['base'] : waveProfiles });
   if (firstWave.code !== 0) fail('docker compose up failed');
